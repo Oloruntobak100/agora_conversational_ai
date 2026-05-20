@@ -2,6 +2,7 @@ import {
   DEFAULT_GREETING,
   DEFAULT_PRESET,
   DEFAULT_SYSTEM_PROMPT,
+  GREETING_DELAY_MS,
 } from "@/lib/constants";
 import type { ServerEnv } from "@/lib/env";
 import type { AgoraJoinRequest } from "@/types/agent";
@@ -26,6 +27,10 @@ export function buildJoinPayload(
   const llm: Record<string, unknown> = {
     system_messages: [{ role: "system", content: systemPrompt }],
     greeting_message: greeting,
+    greeting_configs: {
+      mode: "single_first",
+      delay_ms: GREETING_DELAY_MS,
+    },
     max_history: 32,
   };
 

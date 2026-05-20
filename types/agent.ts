@@ -13,7 +13,9 @@ export interface StartSessionResponse {
   token: string;
   agentId: string;
   agentRtcUid: number;
+  agentStatus: string;
   idleTimeoutSec: number;
+  maxSessionMinutes?: number;
 }
 
 export interface JoinAgentResponse {

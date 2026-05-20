@@ -43,7 +43,7 @@ function VoiceAssistantInner() {
 
       <footer className="shrink-0 pb-2 text-center sm:pb-4">
         <p className="text-[11px] text-neutral-300 sm:text-xs">
-          Tap the microphone to start · Works best with headphones on mobile
+          No phone number needed · Uses your device mic and speaker in the browser
         </p>
       </footer>
     </main>

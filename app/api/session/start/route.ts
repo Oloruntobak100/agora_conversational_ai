@@ -56,9 +56,11 @@ export async function POST(request: Request) {
       joinBody
     );
 
-    // Give the cloud agent a moment to enter the RTC channel before the client joins.
+    // Give the cloud agent time to enter the RTC channel before the client joins.
     if (joinResult.status === "STARTING") {
-      await new Promise((r) => setTimeout(r, 1500));
+      await new Promise((r) => setTimeout(r, 2500));
+    } else if (joinResult.status === "RUNNING") {
+      await new Promise((r) => setTimeout(r, 1000));
     }
 
     console.info("[session/start]", {
@@ -76,6 +78,7 @@ export async function POST(request: Request) {
       token: userToken,
       agentId: joinResult.agent_id,
       agentRtcUid: agentUid,
+      agentStatus: joinResult.status,
       idleTimeoutSec: env.SESSION_IDLE_TIMEOUT_SEC,
       maxSessionMinutes: env.AGENT_SESSION_MAX_MINUTES,
     });

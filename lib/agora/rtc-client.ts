@@ -5,23 +5,24 @@ import type {
 } from "agora-rtc-sdk-ng";
 
 /**
- * Subscribe and play remote audio (agent). Required for users already in the
- * channel when we join — user-published alone is not enough.
+ * Subscribe and play remote audio from the assistant (any remote user except local).
  */
 export async function subscribeAndPlayRemoteAudio(
   client: IAgoraRTCClient,
   user: IAgoraRTCRemoteUser,
-  expectedAgentUid?: number
+  localUid?: number
 ): Promise<IRemoteAudioTrack | null> {
-  if (
-    expectedAgentUid != null &&
-    Number(user.uid) !== Number(expectedAgentUid)
-  ) {
+  if (localUid != null && Number(user.uid) === Number(localUid)) {
     return null;
   }
 
-  if (user.hasAudio && !user.audioTrack) {
-    await client.subscribe(user, "audio");
+  try {
+    if (user.hasAudio && !user.audioTrack) {
+      await client.subscribe(user, "audio");
+    }
+  } catch (err) {
+    console.warn("Subscribe remote audio failed", user.uid, err);
+    return null;
   }
 
   const track = user.audioTrack;
@@ -32,9 +33,14 @@ export async function subscribeAndPlayRemoteAudio(
   try {
     await track.play();
   } catch (err) {
-    console.warn("Remote audio play failed, retrying once", err);
-    await new Promise((r) => setTimeout(r, 300));
-    await track.play();
+    console.warn("Remote audio play failed, retrying", err);
+    await new Promise((r) => setTimeout(r, 400));
+    try {
+      await track.play();
+    } catch (retryErr) {
+      console.warn("Remote audio play retry failed", retryErr);
+      return null;
+    }
   }
 
   return track;
@@ -42,15 +48,11 @@ export async function subscribeAndPlayRemoteAudio(
 
 export async function subscribeAllRemoteAudio(
   client: IAgoraRTCClient,
-  expectedAgentUid?: number
+  localUid?: number
 ): Promise<number> {
   let count = 0;
   for (const user of client.remoteUsers) {
-    const track = await subscribeAndPlayRemoteAudio(
-      client,
-      user,
-      expectedAgentUid
-    );
+    const track = await subscribeAndPlayRemoteAudio(client, user, localUid);
     if (track) count += 1;
   }
   return count;

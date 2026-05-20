@@ -15,6 +15,7 @@ import {
   subscribeAndPlayRemoteAudio,
 } from "@/lib/agora/rtc-client";
 import {
+  AGENT_AUDIO_POLL_MS,
   AGENT_JOIN_TIMEOUT_MS,
   VOLUME_POLL_MS,
   VOLUME_THRESHOLD,
@@ -54,7 +55,7 @@ function getStatusMessage(
     case "armed":
       return agentConnected
         ? "I'm listening — speak, then pause for a reply"
-        : "Waiting for assistant to join…";
+        : "Listen for your assistant — greeting coming…";
     case "userSpeaking":
       return "Hearing you… pause when finished";
     case "agentSpeaking":
@@ -86,12 +87,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const clientRef = useRef<RtcClient | null>(null);
   const localUidRef = useRef<number | null>(null);
-  const agentUidRef = useRef<number | null>(null);
   const micTrackRef = useRef<MicTrack | null>(null);
   const sessionRef = useRef<StartSessionResponse | null>(null);
   const maxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const volumeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const agentWaitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const agentPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const remoteVolumeRef = useRef(0);
   const agentConnectedRef = useRef(false);
 
@@ -102,6 +103,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (agentWaitTimerRef.current) {
       clearTimeout(agentWaitTimerRef.current);
       agentWaitTimerRef.current = null;
+    }
+    if (agentPollTimerRef.current) {
+      clearInterval(agentPollTimerRef.current);
+      agentPollTimerRef.current = null;
     }
   }, []);
 
@@ -118,7 +123,24 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       clearTimeout(agentWaitTimerRef.current);
       agentWaitTimerRef.current = null;
     }
+    if (agentPollTimerRef.current) {
+      clearInterval(agentPollTimerRef.current);
+      agentPollTimerRef.current = null;
+    }
   }, []);
+
+  const trySubscribeAgentAudio = useCallback(async () => {
+    const client = clientRef.current;
+    const localUid = localUidRef.current;
+    if (!client || localUid == null) return false;
+
+    const count = await subscribeAllRemoteAudio(client, localUid);
+    if (count > 0) {
+      markAgentConnected();
+      return true;
+    }
+    return false;
+  }, [markAgentConnected]);
 
   const stopSession = useCallback(async () => {
     clearTimers();
@@ -162,7 +184,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
 
     localUidRef.current = null;
-    agentUidRef.current = null;
     setState("idle");
   }, [clearTimers]);
 
@@ -207,7 +228,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const res = await fetch("/api/session/start", { method: "POST" });
       const data = (await res.json()) as StartSessionResponse & {
         error?: string;
-        maxSessionMinutes?: number;
       };
 
       if (!res.ok) {
@@ -225,7 +245,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
       clientRef.current = client;
       localUidRef.current = data.uid;
-      agentUidRef.current = data.agentRtcUid;
 
       const handleRemoteUser = async (
         user: Parameters<typeof subscribeAndPlayRemoteAudio>[1]
@@ -233,7 +252,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         const track = await subscribeAndPlayRemoteAudio(
           client,
           user,
-          data.agentRtcUid
+          data.uid
         );
         if (track) {
           markAgentConnected();
@@ -246,7 +265,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       });
 
       client.on("user-unpublished", (user) => {
-        if (Number(user.uid) === Number(agentUidRef.current)) {
+        if (Number(user.uid) !== Number(localUidRef.current)) {
           remoteVolumeRef.current = 0;
         }
       });
@@ -262,7 +281,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         remoteVolumeRef.current = remote
           ? Math.min(1, remote.level / 100)
           : 0;
+        if (remote && remote.level > 0) {
+          markAgentConnected();
+        }
       });
+
+      // Join channel first, then publish mic so the agent can greet you.
+      await trySubscribeAgentAudio();
 
       const micTrack = await AgoraRTC.createMicrophoneAudioTrack({
         ANS: true,
@@ -271,19 +296,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       micTrackRef.current = micTrack;
       await client.publish([micTrack]);
 
-      // Agent often joins before us — subscribe to users already in channel.
-      const subscribed = await subscribeAllRemoteAudio(
-        client,
-        data.agentRtcUid
-      );
-      if (subscribed > 0) {
-        markAgentConnected();
-      }
+      await trySubscribeAgentAudio();
+
+      agentPollTimerRef.current = setInterval(() => {
+        void trySubscribeAgentAudio();
+      }, AGENT_AUDIO_POLL_MS);
 
       agentWaitTimerRef.current = setTimeout(() => {
         if (!agentConnectedRef.current) {
           setErrorMessage(
-            "Assistant did not connect to the call. Check Agora Conversational AI is enabled and provider keys are set, then try again."
+            "Could not hear the assistant. Turn volume up, allow speaker audio, and try again in Chrome or Safari."
           );
           setState("error");
           void stopSession();
@@ -310,7 +332,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setState("error");
       await stopSession();
     }
-  }, [state, startVolumePolling, stopSession, markAgentConnected]);
+  }, [
+    state,
+    startVolumePolling,
+    stopSession,
+    markAgentConnected,
+    trySubscribeAgentAudio,
+  ]);
 
   const toggleSession = useCallback(async () => {
     if (state === "idle" || state === "error") {
@@ -347,7 +375,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => {
       window.removeEventListener("beforeunload", handleUnload);
       window.removeEventListener("offline", handleOffline);
-      void stopSessionRef.current();
     };
   }, []);
 
