@@ -120,6 +120,17 @@ npm run lint   # ESLint
 - iOS Safari: same flow; confirm mic permission and audio playback.
 - Confirm Agora Console / billing: agent reaches `leave` after **End session** or tab close.
 
+## Troubleshooting
+
+### “Listening to you” but no voice reply
+
+1. **Internet** — RTC needs a stable connection (Wi‑Fi or mobile data). “No internet connection” in the browser will block the agent.
+2. **Pause after speaking** — The agent sends your audio after you **stop talking** (end-of-speech). Speak, then pause 1–2 seconds.
+3. **Wait for assistant** — Status should change from “Waiting for assistant to join…” to “I'm listening…”. If you get an error after ~25s, check Conversational AI + provider keys in Agora Console.
+4. **Vercel env vars** — All five required Agora variables must be set; redeploy after changes.
+5. **Speaker / volume** — Turn phone volume up; on iOS, disable silent mode. If prompted, tap the mic again to unlock speaker audio.
+6. **Redeploy** — Pull latest `main` (includes fix for subscribing to the agent already in the channel).
+
 ## License
 
 Private — configure per your project.
