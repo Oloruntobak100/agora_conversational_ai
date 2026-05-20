@@ -1,49 +1,41 @@
-import { z } from "zod";
-
-const serverEnvSchema = z.object({
-  AGORA_APP_ID: z.string().min(1),
-  AGORA_APP_CERTIFICATE: z.string().min(1),
-  AGORA_CUSTOMER_ID: z.string().min(1),
-  AGORA_CUSTOMER_SECRET: z.string().min(1),
-  AGORA_CONVERSATIONAL_AI_BASE_URL: z
-    .string()
-    .optional()
-    .transform((v) => (v?.trim() ? v.trim() : "https://api.agora.io")),
-  AGORA_AGENT_PRESET: z.string().optional(),
-  AGENT_SYSTEM_PROMPT: z.string().optional(),
-  AGENT_GREETING_MESSAGE: z.string().optional(),
-  SESSION_IDLE_TIMEOUT_SEC: z.coerce.number().int().positive().default(120),
-  AGENT_SESSION_MAX_MINUTES: z.coerce.number().int().positive().default(30),
-  OPENAI_API_KEY: z.string().optional(),
-  AGENT_LLM_MODEL: z.string().optional(),
-  AGORA_ENABLE_TOOLS: z
-    .enum(["true", "false"])
-    .optional()
-    .transform((v) => v === "true"),
-  N8N_MCP_ENDPOINT: z.string().url().optional(),
-  N8N_MCP_SERVER_NAME: z.string().optional(),
-  N8N_TOOL_WEBHOOK_URL: z.string().url().optional(),
-  N8N_WEBHOOK_SECRET: z.string().optional(),
-});
-
-export type ServerEnv = z.infer<typeof serverEnvSchema>;
-
-export function getServerEnv(): ServerEnv {
-  const parsed = serverEnvSchema.safeParse(process.env);
-  if (!parsed.success) {
-    const missing = parsed.error.issues
-      .map((i) => i.path.join("."))
-      .join(", ");
-    throw new Error(`Missing or invalid environment variables: ${missing}`);
+/**
+ * Server-side Agora credentials with legacy Vercel env fallbacks.
+ */
+export function getAgoraAppId(): string {
+  const id =
+    process.env.NEXT_PUBLIC_AGORA_APP_ID?.trim() ||
+    process.env.AGORA_APP_ID?.trim();
+  if (!id) {
+    throw new Error(
+      "Missing Agora App ID. Set NEXT_PUBLIC_AGORA_APP_ID (or legacy AGORA_APP_ID)."
+    );
   }
-  return parsed.data;
+  return id;
 }
 
-export function getPublicAppId(): string {
-  const appId =
-    process.env.NEXT_PUBLIC_AGORA_APP_ID ?? process.env.AGORA_APP_ID;
-  if (!appId) {
-    throw new Error("NEXT_PUBLIC_AGORA_APP_ID or AGORA_APP_ID is required");
+export function getAgoraAppCertificate(): string {
+  const cert =
+    process.env.NEXT_AGORA_APP_CERTIFICATE?.trim() ||
+    process.env.AGORA_APP_CERTIFICATE?.trim();
+  if (!cert) {
+    throw new Error(
+      "Missing Agora App Certificate. Set NEXT_AGORA_APP_CERTIFICATE (or legacy AGORA_APP_CERTIFICATE)."
+    );
   }
-  return appId;
+  return cert;
+}
+
+export function getAgentUid(): string {
+  return (
+    process.env.NEXT_PUBLIC_AGENT_UID?.trim() ||
+    String(123456)
+  );
+}
+
+export function getAgentGreeting(): string {
+  return (
+    process.env.NEXT_AGENT_GREETING?.trim() ||
+    process.env.AGENT_GREETING_MESSAGE?.trim() ||
+    "Hello! I'm listening. How can I help you today?"
+  );
 }

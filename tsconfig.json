@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
-    "target": "ES2017",
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
+    "target": "ES6",
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
@@ -13,13 +13,15 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
+    "plugins": [{ "name": "next" }],
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "agora-agent-uikit": [
+        "./node_modules/agora-agent-uikit/dist/index.d.ts"
+      ],
+      "agora-agent-uikit/rtc": [
+        "./node_modules/agora-agent-uikit/dist/rtc/index.d.ts"
+      ]
     }
   },
   "include": [
@@ -28,7 +30,7 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
-    "**/*.mts"
+    "types/**/*.d.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "_quickstart-ref"]
 }

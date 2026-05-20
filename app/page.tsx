@@ -1,5 +1,6 @@
-import { VoiceAssistant } from "@/components/VoiceAssistant";
+import LandingPage from '@/components/LandingPage'
 
 export default function Home() {
-  return <VoiceAssistant />;
+  return <LandingPage />
 }
+
