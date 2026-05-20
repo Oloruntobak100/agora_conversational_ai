@@ -101,8 +101,8 @@ pnpm run verify   # doctor + lint + typecheck + API contracts + build
 ### Mobile (Chrome / Safari on phone)
 
 - **Transcript above the orb** on small screens — scroll if needed; pipeline chips hide below `sm` width.
-- **Allow microphone** when prompted; use **HTTPS** (Vercel is fine).
-- If you hear nothing, tap **Tap to enable speaker** (mobile autoplay policy).
+- **Microphone prompt** appears as soon as you tap **Start Conversation** (before the call connects). If you never saw it, check Chrome site settings → Microphone → Allow, reload, and try again. In-call **Allow microphone** appears if the track failed to start.
+- If you hear nothing, tap **Tap to hear agent** (required on most phones for assistant audio).
 - If you see “Live transcript is unavailable”, RTM failed but **voice may still work**.
 - **iOS Safari**: use latest iOS; disable silent mode; prefer Safari over in-app browsers (Instagram, etc.).
 

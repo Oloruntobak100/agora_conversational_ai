@@ -12,6 +12,10 @@ import type {
 } from '../types/conversation';
 import { ErrorBoundary } from './ErrorBoundary';
 import { LoadingSkeleton } from './LoadingSkeleton';
+import { resumeRtcAudioContext } from '@/lib/audio-playback';
+import { ensureMicrophoneAccess } from '@/lib/microphone-permission';
+import { setupRtmClient } from '@/lib/setup-rtm-client';
+import type { RtmConnectionState } from '@/types/conversation';
 import { QuickstartPreCallCard } from './QuickstartPreCallCard';
 
 // Dynamically import the ConversationComponent with ssr disabled
@@ -67,13 +71,26 @@ export default function LandingPage() {
   const [error, setError] = useState<string | null>(null);
   const [agoraData, setAgoraData] = useState<AgoraTokenData | null>(null);
   const [rtmClient, setRtmClient] = useState<RTMClient | null>(null);
-  const [rtmUnavailable, setRtmUnavailable] = useState(false);
+  const [rtmConnectionState, setRtmConnectionState] =
+    useState<RtmConnectionState>('connecting');
   const [agentJoinError, setAgentJoinError] = useState(false);
 
   const handleStartConversation = async () => {
     setIsLoading(true);
     setError(null);
     setAgentJoinError(false);
+
+    // Must run before any await — mobile browsers only show the mic prompt
+    // while the tap gesture is still active.
+    const mic = await ensureMicrophoneAccess();
+    if (!mic.ok) {
+      setError(mic.message);
+      setIsLoading(false);
+      return;
+    }
+
+    // Same user gesture — unlock output audio before async work (mobile autoplay).
+    await resumeRtcAudioContext();
 
     try {
       // 1. Fetch RTC token + channel
@@ -88,47 +105,45 @@ export default function LandingPage() {
         );
       }
 
-      // 2. Run agent invite and RTM setup in parallel — both only need the token response.
-      //    RTM must be ready before ConversationComponent mounts so AgoraVoiceAI
-      //    can subscribe immediately. Agent invite is non-fatal.
-      const agentData = await fetch('/api/invite-agent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requester_id: responseData.uid,
-          channel_name: responseData.channel,
-        } as ClientStartRequest),
-      })
-        .then(async (res) => {
-          if (!res.ok) {
+      // 2. Agent invite + RTM in parallel (quickstart pattern). RTM powers transcript.
+      setRtmConnectionState('connecting');
+      const appId = process.env.NEXT_PUBLIC_AGORA_APP_ID!;
+
+      const [agentData, rtmResult] = await Promise.all([
+        fetch('/api/invite-agent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requester_id: responseData.uid,
+            channel_name: responseData.channel,
+          } as ClientStartRequest),
+        })
+          .then(async (res) => {
+            if (!res.ok) {
+              setAgentJoinError(true);
+              return null;
+            }
+            return res.json() as Promise<AgentResponse>;
+          })
+          .catch((err) => {
+            console.error('Failed to start conversation with agent:', err);
             setAgentJoinError(true);
             return null;
-          }
-          return res.json() as Promise<AgentResponse>;
-        })
-        .catch((err) => {
-          console.error('Failed to start conversation with agent:', err);
-          setAgentJoinError(true);
+          }),
+
+        setupRtmClient({
+          appId,
+          uid: responseData.uid,
+          token: responseData.token,
+          channel: responseData.channel,
+        }).catch((rtmErr) => {
+          console.error('RTM setup failed:', rtmErr);
           return null;
-        });
+        }),
+      ]);
 
-      let rtm: RTMClient | null = null;
-      setRtmUnavailable(false);
-      try {
-        const { default: AgoraRTM } = await import('agora-rtm');
-        const rtmInstance: RTMClient = new AgoraRTM.RTM(
-          process.env.NEXT_PUBLIC_AGORA_APP_ID!,
-          responseData.uid,
-        );
-        await rtmInstance.login({ token: responseData.token });
-        await rtmInstance.subscribe(responseData.channel);
-        rtm = rtmInstance;
-      } catch (rtmErr) {
-        console.error('RTM setup failed (voice may work without transcript):', rtmErr);
-        setRtmUnavailable(true);
-      }
-
-      // Show conversation when RTC token is ready; RTM is optional for transcript
+      const rtm = rtmResult as RTMClient | null;
+      setRtmConnectionState(rtm ? 'ready' : 'failed');
       setRtmClient(rtm);
       setAgoraData({ ...responseData, agentId: agentData?.agent_id });
       setShowConversation(true);
@@ -233,11 +248,10 @@ export default function LandingPage() {
                   as expected.
                 </div>
               )}
-              {rtmUnavailable && (
+              {rtmConnectionState === 'failed' && (
                 <div className="mx-4 mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-200">
-                  Live transcript is unavailable on this device. Voice may still
-                  work — allow microphone access and tap the speaker area if you
-                  hear nothing.
+                  Live transcript is still connecting. Voice works after you tap
+                  &quot;Tap to hear agent&quot; below if you hear nothing.
                 </div>
               )}
               <Suspense fallback={<LoadingSkeleton />}>
@@ -246,7 +260,7 @@ export default function LandingPage() {
                     <ConversationComponent
                       agoraData={agoraData}
                       rtmClient={rtmClient}
-                      rtmUnavailable={rtmUnavailable}
+                      rtmConnectionState={rtmConnectionState}
                       onTokenWillExpire={handleTokenWillExpire}
                       onEndConversation={handleEndConversation}
                     />

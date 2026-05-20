@@ -27,10 +27,12 @@ export interface AgoraRenewalTokens {
   rtmToken: string;
 }
 
+export type RtmConnectionState = 'connecting' | 'ready' | 'failed';
+
 export interface ConversationComponentProps {
   agoraData: AgoraTokenData;
   rtmClient: RTMClient | null;
-  rtmUnavailable?: boolean;
+  rtmConnectionState: RtmConnectionState;
   onTokenWillExpire: (uid: string) => Promise<AgoraRenewalTokens>;
   onEndConversation: () => void;
 }

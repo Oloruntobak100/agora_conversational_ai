@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import AgoraRTC, {
   useRTCClient,
   useLocalMicrophoneTrack,
@@ -24,6 +24,14 @@ import {
 import { AgentVisualizer } from 'agora-agent-uikit';
 import { MicButtonWithVisualizer } from 'agora-agent-uikit/rtc';
 import { DEFAULT_AGENT_UID } from '@/lib/agora';
+import {
+  playAgentRemoteAudio,
+  resumeRtcAudioContext,
+} from '@/lib/audio-playback';
+import { isMobileBrowser } from '@/lib/device';
+import { ensureMicrophoneAccess } from '@/lib/microphone-permission';
+import { setupRtmClient } from '@/lib/setup-rtm-client';
+import type { RtmConnectionState } from '@/types/conversation';
 import {
   getCurrentInProgressMessage,
   getMessageList,
@@ -93,7 +101,7 @@ function isRtmSalStatusPayload(value: unknown): value is RtmSalStatusPayload {
 export default function ConversationComponent({
   agoraData,
   rtmClient,
-  rtmUnavailable = false,
+  rtmConnectionState,
   onTokenWillExpire,
   onEndConversation,
 }: ConversationComponentProps) {
@@ -102,7 +110,16 @@ export default function ConversationComponent({
   const [isEnabled, setIsEnabled] = useState(true);
   const [isAgentConnected, setIsAgentConnected] = useState(false);
   const [isConnectionDetailsOpen, setIsConnectionDetailsOpen] = useState(false);
+  const [activeRtm, setActiveRtm] = useState(rtmClient);
+  const [rtmState, setRtmState] = useState<RtmConnectionState>(rtmConnectionState);
   const [speakerBlocked, setSpeakerBlocked] = useState(false);
+  const [speakerUnlocked, setSpeakerUnlocked] = useState(false);
+  const isMobile = isMobileBrowser();
+  const [micMissing, setMicMissing] = useState(false);
+  const [micError, setMicError] = useState<string | null>(null);
+  const [fallbackMicTrack, setFallbackMicTrack] = useState<
+    Awaited<ReturnType<typeof AgoraRTC.createMicrophoneAudioTrack>> | null
+  >(null);
 
   // Tracks granular RTC connection state for the status dot.
   // Agora states: DISCONNECTED | CONNECTING | CONNECTED | DISCONNECTING | RECONNECTING
@@ -176,6 +193,44 @@ export default function ConversationComponent({
   // Do NOT pass `isEnabled` — that ties track lifetime to mute state and breaks the Web Audio
   // graph inside MicButtonWithVisualizer. Mute uses track.setEnabled() only.
   const { localMicrophoneTrack } = useLocalMicrophoneTrack(isReady);
+  const activeMicTrack = localMicrophoneTrack ?? fallbackMicTrack;
+
+  useEffect(() => {
+    if (!isReady || !joinSuccess) {
+      setMicMissing(false);
+      return;
+    }
+    if (activeMicTrack) {
+      setMicMissing(false);
+      setMicError(null);
+      return;
+    }
+    const id = window.setTimeout(() => setMicMissing(true), 2000);
+    return () => window.clearTimeout(id);
+  }, [isReady, joinSuccess, activeMicTrack]);
+
+  const requestMicrophoneAgain = useCallback(async () => {
+    setMicError(null);
+    const mic = await ensureMicrophoneAccess();
+    if (!mic.ok) {
+      setMicError(mic.message);
+      return;
+    }
+    try {
+      if (fallbackMicTrack) {
+        fallbackMicTrack.stop();
+        fallbackMicTrack.close();
+      }
+      const track = await AgoraRTC.createMicrophoneAudioTrack();
+      setFallbackMicTrack(track);
+      setMicMissing(false);
+    } catch (err) {
+      console.error('Failed to create microphone track:', err);
+      setMicError(
+        'Could not start the microphone. Check permissions and try again.',
+      );
+    }
+  }, [fallbackMicTrack]);
 
   // ENABLE_AUDIO_PTS is a module-level SDK parameter (not on the client instance).
   // It must be set before publishing audio for transcript timing to be accurate.
@@ -191,29 +246,81 @@ export default function ConversationComponent({
     }
   }, [client]);
 
-  // Mobile browsers often block remote audio until a user gesture after join.
+  useEffect(() => {
+    setActiveRtm(rtmClient);
+    setRtmState(rtmConnectionState);
+  }, [rtmClient, rtmConnectionState]);
+
+  const rtmReconnectAttempts = useRef(0);
+
+  // Retry RTM in-call when bootstrap failed (common on mobile / incognito).
+  useEffect(() => {
+    if (activeRtm || !joinSuccess || !isReady || rtmState !== 'failed') return;
+    if (rtmReconnectAttempts.current >= 2) return;
+
+    rtmReconnectAttempts.current += 1;
+    let cancelled = false;
+
+    (async () => {
+      setRtmState('connecting');
+      try {
+        const rtm = await setupRtmClient({
+          appId: process.env.NEXT_PUBLIC_AGORA_APP_ID!,
+          uid: agoraData.uid,
+          token: agoraData.token,
+          channel: agoraData.channel,
+        });
+        if (!cancelled) {
+          setActiveRtm(rtm);
+          setRtmState('ready');
+        }
+      } catch (err) {
+        console.error('In-call RTM reconnect failed:', err);
+        if (!cancelled) setRtmState('failed');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeRtm,
+    joinSuccess,
+    isReady,
+    rtmState,
+    agoraData.uid,
+    agoraData.token,
+    agoraData.channel,
+  ]);
+
   useEffect(() => {
     AgoraRTC.onAutoplayFailed = () => {
       setSpeakerBlocked(true);
+      setSpeakerUnlocked(false);
     };
     return () => {
       AgoraRTC.onAutoplayFailed = undefined;
     };
   }, []);
 
-  const resumeRemoteAudio = useCallback(() => {
-    for (const user of remoteUsers) {
-      const track = user.audioTrack;
-      if (track) {
-        try {
-          track.play();
-        } catch (err) {
-          console.warn('Resume remote audio failed:', err);
-        }
-      }
-    }
-    setSpeakerBlocked(false);
-  }, [remoteUsers]);
+  const unlockAgentSpeaker = useCallback(async () => {
+    const played = await playAgentRemoteAudio(remoteUsers, agentUID);
+    setSpeakerUnlocked(played);
+    setSpeakerBlocked(!played);
+    return played;
+  }, [remoteUsers, agentUID]);
+
+  const agentAudioPlayAttempted = useRef(false);
+
+  // Try agent playback once when their audio track appears (may still need a tap on mobile).
+  useEffect(() => {
+    if (!joinSuccess || !isAgentConnected || agentAudioPlayAttempted.current) return;
+    const agent = remoteUsers.find((u) => u.uid.toString() === agentUID);
+    if (!agent?.audioTrack) return;
+
+    agentAudioPlayAttempted.current = true;
+    void unlockAgentSpeaker();
+  }, [joinSuccess, isAgentConnected, remoteUsers, agentUID, unlockAgentSpeaker]);
 
   // Track the auto-assigned RTC UID for token renewal and agent invite.
   useEffect(() => {
@@ -234,7 +341,7 @@ export default function ConversationComponent({
   //     subsequent state changes (`joinSuccess` becoming true). That means
   //     AgoraVoiceAI.init() is called exactly once.
   useEffect(() => {
-    if (!isReady || !joinSuccess || !rtmClient || rtmUnavailable) return;
+    if (!isReady || !joinSuccess || !activeRtm) return;
 
     let cancelled = false;
 
@@ -242,7 +349,7 @@ export default function ConversationComponent({
       try {
         const ai = await AgoraVoiceAI.init({
           rtcEngine: client,
-          rtmConfig: { rtmEngine: rtmClient },
+          rtmConfig: { rtmEngine: activeRtm },
           renderMode: TranscriptHelperMode.TEXT,
           enableLog: true,
         });
@@ -328,11 +435,11 @@ export default function ConversationComponent({
       } catch {}
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isReady, joinSuccess, rtmClient, rtmUnavailable]);
+  }, [isReady, joinSuccess, activeRtm, agoraData.channel, client, addConnectionIssue]);
 
   // Raw RTM parsing is kept as a fallback for signaling-level errors and SAL status.
   useEffect(() => {
-    if (!rtmClient) return;
+    if (!activeRtm) return;
 
     const handleRtmMessage = (event: {
       message: string | Uint8Array;
@@ -381,11 +488,11 @@ export default function ConversationComponent({
       }
     };
 
-    rtmClient.addEventListener('message', handleRtmMessage);
+    activeRtm.addEventListener('message', handleRtmMessage);
     return () => {
-      rtmClient.removeEventListener('message', handleRtmMessage);
+      activeRtm.removeEventListener('message', handleRtmMessage);
     };
-  }, [rtmClient, addConnectionIssue]);
+  }, [activeRtm, addConnectionIssue]);
 
   // The toolkit uses uid="0" for local user speech — remap to actual RTC UID
   // so the transcript panel renders user messages on the correct side.
@@ -405,7 +512,7 @@ export default function ConversationComponent({
   }, [transcript]);
 
   // Publish local mic once the track exists; usePublish waits for RTC connection.
-  usePublish([localMicrophoneTrack]);
+  usePublish([activeMicTrack]);
 
   useClientEvent(client, 'user-joined', (user) => {
     if (user.uid.toString() === agentUID) setIsAgentConnected(true);
@@ -463,8 +570,11 @@ export default function ConversationComponent({
    * and break the MicButtonWithVisualizer Web Audio graph.
    */
   const handleMicToggle = useCallback(async () => {
+    await resumeRtcAudioContext();
+    void unlockAgentSpeaker();
+
     const next = !isEnabled;
-    const track = localMicrophoneTrack;
+    const track = activeMicTrack;
     if (!track) {
       setIsEnabled(next);
       return;
@@ -475,7 +585,7 @@ export default function ConversationComponent({
     } catch (error) {
       console.error('Failed to toggle microphone:', error);
     }
-  }, [isEnabled, localMicrophoneTrack]);
+  }, [isEnabled, activeMicTrack, unlockAgentSpeaker]);
 
   const handleTokenWillExpire = useCallback(async () => {
     if (!onTokenWillExpire || !joinedUID) return;
@@ -485,19 +595,20 @@ export default function ConversationComponent({
         joinedUID.toString(),
       );
       await client?.renewToken(rtcToken);
-      if (rtmClient) {
-        await rtmClient.renewToken(rtmToken);
+      if (activeRtm) {
+        await activeRtm.renewToken(rtmToken);
       }
     } catch (error) {
       console.error('Failed to renew Agora token:', error);
     }
-  }, [client, onTokenWillExpire, joinedUID, rtmClient]);
+  }, [client, onTokenWillExpire, joinedUID, activeRtm]);
 
   useClientEvent(client, 'token-privilege-will-expire', handleTokenWillExpire);
 
   const handleEndConversation = useCallback(async () => {
-    const track = localMicrophoneTrack;
-    if (track) {
+    const tracks = [localMicrophoneTrack, fallbackMicTrack].filter(Boolean);
+    for (const track of tracks) {
+      if (!track) continue;
       try {
         await client?.unpublish(track);
       } catch (error) {
@@ -513,10 +624,16 @@ export default function ConversationComponent({
     }
 
     onEndConversation();
-  }, [client, localMicrophoneTrack, onEndConversation]);
+  }, [client, localMicrophoneTrack, fallbackMicTrack, onEndConversation]);
+
+  const showSpeakerPrompt =
+    joinSuccess &&
+    isAgentConnected &&
+    (speakerBlocked || (isMobile && !speakerUnlocked));
 
   return (
     <QuickstartConversationLayout
+      rtmState={rtmState}
       statusPanel={
         <ConnectionStatusPanel
           connectionState={connectionState}
@@ -550,13 +667,32 @@ export default function ConversationComponent({
       }
       controls={
         <div className="flex w-full flex-col items-center gap-2">
-          {speakerBlocked && (
+          {micMissing && (
+            <div className="flex flex-col items-center gap-2 px-4 text-center">
+              <button
+                type="button"
+                onClick={requestMicrophoneAgain}
+                className="rounded-full border border-destructive bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive"
+              >
+                Allow microphone
+              </button>
+              {micError && (
+                <p className="max-w-sm text-xs text-destructive">{micError}</p>
+              )}
+            </div>
+          )}
+          {rtmState === 'connecting' && (
+            <p className="px-4 text-center text-xs text-muted-foreground">
+              Connecting live transcript…
+            </p>
+          )}
+          {showSpeakerPrompt && (
             <button
               type="button"
-              onClick={resumeRemoteAudio}
-              className="rounded-full border border-primary bg-primary/10 px-4 py-2 text-sm font-medium text-primary"
+              onClick={unlockAgentSpeaker}
+              className="w-full max-w-sm rounded-xl border-2 border-primary bg-primary px-5 py-3 text-base font-semibold text-black shadow-lg active:scale-[0.98]"
             >
-              Tap to enable speaker
+              Tap to hear agent
             </button>
           )}
         <div
@@ -568,7 +704,7 @@ export default function ConversationComponent({
             <MicButtonWithVisualizer
               isEnabled={isEnabled}
               setIsEnabled={setIsEnabled}
-              track={localMicrophoneTrack}
+              track={activeMicTrack}
               onToggle={handleMicToggle}
               className="overflow-visible"
               aria-label={isEnabled ? 'Mute microphone' : 'Unmute microphone'}
@@ -576,7 +712,7 @@ export default function ConversationComponent({
               disabledColor="hsl(var(--destructive))"
             />
           </div>
-          <MicrophoneSelector localMicrophoneTrack={localMicrophoneTrack} />
+          <MicrophoneSelector localMicrophoneTrack={activeMicTrack} />
         </div>
         </div>
       }
