@@ -9,6 +9,10 @@ export const DEFAULT_GREETING =
 
 export const RTC_TOKEN_TTL_SEC = 3600;
 
-export const VOLUME_THRESHOLD = 0.08;
+/** Mic level above this shows "Listening to you…" (higher = less sensitive on noisy phones). */
+export const VOLUME_THRESHOLD = 0.14;
+
+/** If no agent in channel after this, show an error (ms). */
+export const AGENT_JOIN_TIMEOUT_MS = 25_000;
 
 export const VOLUME_POLL_MS = 100;

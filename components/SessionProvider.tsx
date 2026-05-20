@@ -10,7 +10,15 @@ import {
   type ReactNode,
 } from "react";
 
-import { VOLUME_POLL_MS, VOLUME_THRESHOLD } from "@/lib/constants";
+import {
+  subscribeAllRemoteAudio,
+  subscribeAndPlayRemoteAudio,
+} from "@/lib/agora/rtc-client";
+import {
+  AGENT_JOIN_TIMEOUT_MS,
+  VOLUME_POLL_MS,
+  VOLUME_THRESHOLD,
+} from "@/lib/constants";
 import type { SessionUiState, StartSessionResponse } from "@/types/agent";
 
 type AgoraModule = typeof import("agora-rtc-sdk-ng");
@@ -26,6 +34,7 @@ interface VoiceSessionContextValue {
   userVolume: number;
   agentVolume: number;
   isActive: boolean;
+  agentConnected: boolean;
   startSession: () => Promise<void>;
   stopSession: () => Promise<void>;
   toggleSession: () => Promise<void>;
@@ -33,16 +42,21 @@ interface VoiceSessionContextValue {
 
 const VoiceSessionContext = createContext<VoiceSessionContextValue | null>(null);
 
-function getStatusMessage(state: SessionUiState): string {
+function getStatusMessage(
+  state: SessionUiState,
+  agentConnected: boolean
+): string {
   switch (state) {
     case "idle":
       return "Tap the microphone to start";
     case "connecting":
-      return "Connecting to your assistant…";
+      return "Starting session…";
     case "armed":
-      return "I'm listening — speak anytime";
+      return agentConnected
+        ? "I'm listening — speak, then pause for a reply"
+        : "Waiting for assistant to join…";
     case "userSpeaking":
-      return "Listening to you…";
+      return "Hearing you… pause when finished";
     case "agentSpeaking":
       return "Assistant is speaking…";
     case "error":
@@ -68,14 +82,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [userVolume, setUserVolume] = useState(0);
   const [agentVolume, setAgentVolume] = useState(0);
+  const [agentConnected, setAgentConnected] = useState(false);
 
   const clientRef = useRef<RtcClient | null>(null);
   const localUidRef = useRef<number | null>(null);
+  const agentUidRef = useRef<number | null>(null);
   const micTrackRef = useRef<MicTrack | null>(null);
   const sessionRef = useRef<StartSessionResponse | null>(null);
   const maxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const volumeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const agentWaitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const remoteVolumeRef = useRef(0);
+  const agentConnectedRef = useRef(false);
+
+  const markAgentConnected = useCallback(() => {
+    if (agentConnectedRef.current) return;
+    agentConnectedRef.current = true;
+    setAgentConnected(true);
+    if (agentWaitTimerRef.current) {
+      clearTimeout(agentWaitTimerRef.current);
+      agentWaitTimerRef.current = null;
+    }
+  }, []);
 
   const clearTimers = useCallback(() => {
     if (maxTimerRef.current) {
@@ -86,6 +114,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       clearInterval(volumeTimerRef.current);
       volumeTimerRef.current = null;
     }
+    if (agentWaitTimerRef.current) {
+      clearTimeout(agentWaitTimerRef.current);
+      agentWaitTimerRef.current = null;
+    }
   }, []);
 
   const stopSession = useCallback(async () => {
@@ -93,6 +125,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setUserVolume(0);
     setAgentVolume(0);
     remoteVolumeRef.current = 0;
+    agentConnectedRef.current = false;
+    setAgentConnected(false);
 
     const session = sessionRef.current;
     sessionRef.current = null;
@@ -127,6 +161,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       clientRef.current = null;
     }
 
+    localUidRef.current = null;
+    agentUidRef.current = null;
     setState("idle");
   }, [clearTimers]);
 
@@ -151,6 +187,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const startSession = useCallback(async () => {
     if (state === "connecting") return;
 
+    if (!navigator.onLine) {
+      setErrorMessage(
+        "No internet connection. Connect to Wi‑Fi or mobile data and try again."
+      );
+      setState("error");
+      return;
+    }
+
     setErrorMessage(null);
     setState("connecting");
 
@@ -172,18 +216,39 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
       const AgoraRTC = (await import("agora-rtc-sdk-ng")).default;
 
+      AgoraRTC.onAutoplayFailed = () => {
+        setErrorMessage(
+          "Speaker blocked by browser. Tap the microphone again to enable audio."
+        );
+      };
+
       const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
       clientRef.current = client;
       localUidRef.current = data.uid;
+      agentUidRef.current = data.agentRtcUid;
+
+      const handleRemoteUser = async (
+        user: Parameters<typeof subscribeAndPlayRemoteAudio>[1]
+      ) => {
+        const track = await subscribeAndPlayRemoteAudio(
+          client,
+          user,
+          data.agentRtcUid
+        );
+        if (track) {
+          markAgentConnected();
+        }
+      };
 
       client.on("user-published", async (user, mediaType) => {
         if (mediaType !== "audio") return;
-        await client.subscribe(user, mediaType);
-        user.audioTrack?.play();
+        await handleRemoteUser(user);
       });
 
-      client.on("user-unpublished", () => {
-        remoteVolumeRef.current = 0;
+      client.on("user-unpublished", (user) => {
+        if (Number(user.uid) === Number(agentUidRef.current)) {
+          remoteVolumeRef.current = 0;
+        }
       });
 
       await client.join(appId, data.channel, data.token, data.uid);
@@ -191,7 +256,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       client.enableAudioVolumeIndicator();
       client.on("volume-indicator", (volumes) => {
         const localUid = localUidRef.current;
-        const remote = volumes.find((v) => v.uid !== localUid);
+        const remote = volumes.find(
+          (v) => Number(v.uid) !== Number(localUid)
+        );
         remoteVolumeRef.current = remote
           ? Math.min(1, remote.level / 100)
           : 0;
@@ -203,6 +270,25 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       });
       micTrackRef.current = micTrack;
       await client.publish([micTrack]);
+
+      // Agent often joins before us — subscribe to users already in channel.
+      const subscribed = await subscribeAllRemoteAudio(
+        client,
+        data.agentRtcUid
+      );
+      if (subscribed > 0) {
+        markAgentConnected();
+      }
+
+      agentWaitTimerRef.current = setTimeout(() => {
+        if (!agentConnectedRef.current) {
+          setErrorMessage(
+            "Assistant did not connect to the call. Check Agora Conversational AI is enabled and provider keys are set, then try again."
+          );
+          setState("error");
+          void stopSession();
+        }
+      }, AGENT_JOIN_TIMEOUT_MS);
 
       sessionRef.current = data;
       startVolumePolling();
@@ -224,7 +310,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setState("error");
       await stopSession();
     }
-  }, [state, startVolumePolling, stopSession]);
+  }, [state, startVolumePolling, stopSession, markAgentConnected]);
 
   const toggleSession = useCallback(async () => {
     if (state === "idle" || state === "error") {
@@ -247,9 +333,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       navigator.sendBeacon("/api/session/stop", blob);
     };
 
+    const handleOffline = () => {
+      if (sessionRef.current) {
+        setErrorMessage(
+          "Connection lost. End the session and try again when back online."
+        );
+        setState("error");
+      }
+    };
+
     window.addEventListener("beforeunload", handleUnload);
+    window.addEventListener("offline", handleOffline);
     return () => {
       window.removeEventListener("beforeunload", handleUnload);
+      window.removeEventListener("offline", handleOffline);
       void stopSessionRef.current();
     };
   }, []);
@@ -262,11 +359,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const value: VoiceSessionContextValue = {
     state,
-    statusMessage: getStatusMessage(state),
+    statusMessage: getStatusMessage(state, agentConnected),
     errorMessage,
     userVolume,
     agentVolume,
     isActive,
+    agentConnected,
     startSession,
     stopSession,
     toggleSession,
