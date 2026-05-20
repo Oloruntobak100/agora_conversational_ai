@@ -211,9 +211,19 @@ export default function LandingPage() {
       }
     }
 
-    // Tear down RTM — owned here since we created it here
-    rtmClient?.logout().catch((err) => console.error('RTM logout error:', err));
+    // ConversationComponent also tears down RTM/RTC; this covers early exit paths.
+    if (rtmClient && agoraData?.channel) {
+      try {
+        await rtmClient.unsubscribe(agoraData.channel);
+        await rtmClient.logout();
+      } catch (err) {
+        console.error('RTM logout error:', err);
+      }
+    }
+
     setRtmClient(null);
+    setRtmConnectionState('connecting');
+    setAgoraData(null);
     setShowConversation(false);
   };
 
@@ -256,8 +266,9 @@ export default function LandingPage() {
               )}
               <Suspense fallback={<LoadingSkeleton />}>
                 <ErrorBoundary>
-                  <AgoraProvider>
+                  <AgoraProvider key={agoraData.channel}>
                     <ConversationComponent
+                      key={agoraData.channel}
                       agoraData={agoraData}
                       rtmClient={rtmClient}
                       rtmConnectionState={rtmConnectionState}

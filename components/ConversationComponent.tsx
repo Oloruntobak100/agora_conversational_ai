@@ -113,7 +113,8 @@ export default function ConversationComponent({
   const [activeRtm, setActiveRtm] = useState(rtmClient);
   const [rtmState, setRtmState] = useState<RtmConnectionState>(rtmConnectionState);
   const [speakerBlocked, setSpeakerBlocked] = useState(false);
-  const [speakerUnlocked, setSpeakerUnlocked] = useState(false);
+  /** Only set when the user taps "Tap to hear agent" — auto-play must not hide the button. */
+  const [heardAgentViaTap, setHeardAgentViaTap] = useState(false);
   const isMobile = isMobileBrowser();
   const [micMissing, setMicMissing] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
@@ -151,12 +152,16 @@ export default function ConversationComponent({
     });
   }, []);
 
-  // Auto-open details panel as soon as a new issue is recorded.
+  // Auto-open details only for hard errors (avoid yellow-dot noise from transient RTM warnings).
   useEffect(() => {
-    if (connectionIssues.length > 0) {
+    if (
+      connectionIssues.some(
+        (issue) => getConversationIssueSeverity(issue) === 'error',
+      )
+    ) {
       setIsConnectionDetailsOpen(true);
     }
-  }, [connectionIssues.length]);
+  }, [connectionIssues]);
 
   // StrictMode guard: delay `useJoin`'s ready flag until after the fake-unmount
   // cycle completes. React StrictMode fires cleanup synchronously before any
@@ -252,6 +257,7 @@ export default function ConversationComponent({
   }, [rtmClient, rtmConnectionState]);
 
   const rtmReconnectAttempts = useRef(0);
+  const agentAudioPlayAttempted = useRef(false);
 
   // Retry RTM in-call when bootstrap failed (common on mobile / incognito).
   useEffect(() => {
@@ -296,30 +302,57 @@ export default function ConversationComponent({
   useEffect(() => {
     AgoraRTC.onAutoplayFailed = () => {
       setSpeakerBlocked(true);
-      setSpeakerUnlocked(false);
+      setHeardAgentViaTap(false);
     };
     return () => {
       AgoraRTC.onAutoplayFailed = undefined;
     };
   }, []);
 
-  const unlockAgentSpeaker = useCallback(async () => {
-    const played = await playAgentRemoteAudio(remoteUsers, agentUID);
-    setSpeakerUnlocked(played);
-    setSpeakerBlocked(!played);
-    return played;
-  }, [remoteUsers, agentUID]);
+  // New channel = fresh speaker unlock requirement.
+  useEffect(() => {
+    setHeardAgentViaTap(false);
+    setSpeakerBlocked(false);
+    setConnectionIssues([]);
+    agentAudioPlayAttempted.current = false;
+    rtmReconnectAttempts.current = 0;
+  }, [agoraData.channel]);
 
-  const agentAudioPlayAttempted = useRef(false);
+  // When returning to the tab, mobile often suspends audio — show the tap button again.
+  useEffect(() => {
+    if (!isMobile) return;
 
-  // Try agent playback once when their audio track appears (may still need a tap on mobile).
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible' || !joinSuccess) return;
+      setHeardAgentViaTap(false);
+      setSpeakerBlocked(true);
+      void resumeRtcAudioContext();
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [isMobile, joinSuccess]);
+
+  const unlockAgentSpeaker = useCallback(
+    async (fromUserTap = false) => {
+      const played = await playAgentRemoteAudio(remoteUsers, agentUID);
+      if (fromUserTap && played) {
+        setHeardAgentViaTap(true);
+      }
+      setSpeakerBlocked(!played);
+      return played;
+    },
+    [remoteUsers, agentUID],
+  );
+
+  // Best-effort autoplay when the agent track appears (does not hide the mobile button).
   useEffect(() => {
     if (!joinSuccess || !isAgentConnected || agentAudioPlayAttempted.current) return;
     const agent = remoteUsers.find((u) => u.uid.toString() === agentUID);
     if (!agent?.audioTrack) return;
 
     agentAudioPlayAttempted.current = true;
-    void unlockAgentSpeaker();
+    void unlockAgentSpeaker(false);
   }, [joinSuccess, isAgentConnected, remoteUsers, agentUID, unlockAgentSpeaker]);
 
   // Track the auto-assigned RTC UID for token renewal and agent invite.
@@ -551,12 +584,19 @@ export default function ConversationComponent({
     if (connectionIssues.length === 0) {
       return 'normal';
     }
-    return connectionIssues.some(
+    const hasError = connectionIssues.some(
       (issue) => getConversationIssueSeverity(issue) === 'error',
-    )
-      ? 'error'
-      : 'warning';
-  }, [connectionState, connectionIssues]);
+    );
+    if (hasError) return 'error';
+    // RTC is up: treat RTM-only warnings as healthy unless transcript never connected.
+    if (connectionState === 'CONNECTED' && rtmState === 'ready') {
+      return 'normal';
+    }
+    if (connectionState === 'CONNECTED' && isAgentConnected) {
+      return 'warning';
+    }
+    return 'warning';
+  }, [connectionState, connectionIssues, rtmState, isAgentConnected]);
 
   const visualizerState = useMemo(
     () =>
@@ -571,7 +611,7 @@ export default function ConversationComponent({
    */
   const handleMicToggle = useCallback(async () => {
     await resumeRtcAudioContext();
-    void unlockAgentSpeaker();
+    void unlockAgentSpeaker(false);
 
     const next = !isEnabled;
     const track = activeMicTrack;
@@ -623,13 +663,48 @@ export default function ConversationComponent({
       }
     }
 
+    try {
+      const ai = AgoraVoiceAI.getInstance();
+      if (ai) {
+        ai.unsubscribe();
+        ai.destroy();
+      }
+    } catch (error) {
+      console.warn('AgoraVoiceAI teardown failed:', error);
+    }
+
+    try {
+      if (activeRtm) {
+        await activeRtm.unsubscribe(agoraData.channel);
+        await activeRtm.logout();
+      }
+    } catch (error) {
+      console.warn('RTM teardown failed:', error);
+    }
+
+    try {
+      if (client && joinSuccess) {
+        await client.leave();
+      }
+    } catch (error) {
+      console.warn('RTC leave failed:', error);
+    }
+
     onEndConversation();
-  }, [client, localMicrophoneTrack, fallbackMicTrack, onEndConversation]);
+  }, [
+    client,
+    joinSuccess,
+    localMicrophoneTrack,
+    fallbackMicTrack,
+    activeRtm,
+    agoraData.channel,
+    onEndConversation,
+  ]);
 
   const showSpeakerPrompt =
     joinSuccess &&
     isAgentConnected &&
-    (speakerBlocked || (isMobile && !speakerUnlocked));
+    (speakerBlocked || (isMobile && !heardAgentViaTap));
 
   return (
     <QuickstartConversationLayout
@@ -689,10 +764,19 @@ export default function ConversationComponent({
           {showSpeakerPrompt && (
             <button
               type="button"
-              onClick={unlockAgentSpeaker}
+              onClick={() => void unlockAgentSpeaker(true)}
               className="w-full max-w-sm rounded-xl border-2 border-primary bg-primary px-5 py-3 text-base font-semibold text-black shadow-lg active:scale-[0.98]"
             >
               Tap to hear agent
+            </button>
+          )}
+          {isMobile && joinSuccess && isAgentConnected && heardAgentViaTap && (
+            <button
+              type="button"
+              onClick={() => void unlockAgentSpeaker(true)}
+              className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+            >
+              No sound? Tap again
             </button>
           )}
         <div
