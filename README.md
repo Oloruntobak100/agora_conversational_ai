@@ -98,6 +98,14 @@ pnpm run verify   # doctor + lint + typecheck + API contracts + build
 | Agent never joins | `NEXT_PUBLIC_AGENT_UID` must match `getAgentUid()` / invite route |
 | No transcript | RTM must be enabled on agent (`enable_rtm: true`) |
 
+### Mobile (Chrome / Safari on phone)
+
+- **Transcript above the orb** on small screens — scroll if needed; pipeline chips hide below `sm` width.
+- **Allow microphone** when prompted; use **HTTPS** (Vercel is fine).
+- If you hear nothing, tap **Tap to enable speaker** (mobile autoplay policy).
+- If you see “Live transcript is unavailable”, RTM failed but **voice may still work**.
+- **iOS Safari**: use latest iOS; disable silent mode; prefer Safari over in-app browsers (Instagram, etc.).
+
 See [AGENTS.md](./AGENTS.md) and Agora [DOCS](https://github.com/AgoraIO-Conversational-AI/agent-quickstart-nextjs/tree/main/DOCS).
 
 ## License

@@ -93,6 +93,7 @@ function isRtmSalStatusPayload(value: unknown): value is RtmSalStatusPayload {
 export default function ConversationComponent({
   agoraData,
   rtmClient,
+  rtmUnavailable = false,
   onTokenWillExpire,
   onEndConversation,
 }: ConversationComponentProps) {
@@ -101,6 +102,7 @@ export default function ConversationComponent({
   const [isEnabled, setIsEnabled] = useState(true);
   const [isAgentConnected, setIsAgentConnected] = useState(false);
   const [isConnectionDetailsOpen, setIsConnectionDetailsOpen] = useState(false);
+  const [speakerBlocked, setSpeakerBlocked] = useState(false);
 
   // Tracks granular RTC connection state for the status dot.
   // Agora states: DISCONNECTED | CONNECTING | CONNECTED | DISCONNECTING | RECONNECTING
@@ -189,6 +191,30 @@ export default function ConversationComponent({
     }
   }, [client]);
 
+  // Mobile browsers often block remote audio until a user gesture after join.
+  useEffect(() => {
+    AgoraRTC.onAutoplayFailed = () => {
+      setSpeakerBlocked(true);
+    };
+    return () => {
+      AgoraRTC.onAutoplayFailed = undefined;
+    };
+  }, []);
+
+  const resumeRemoteAudio = useCallback(() => {
+    for (const user of remoteUsers) {
+      const track = user.audioTrack;
+      if (track) {
+        try {
+          track.play();
+        } catch (err) {
+          console.warn('Resume remote audio failed:', err);
+        }
+      }
+    }
+    setSpeakerBlocked(false);
+  }, [remoteUsers]);
+
   // Track the auto-assigned RTC UID for token renewal and agent invite.
   useEffect(() => {
     if (joinSuccess && client) {
@@ -208,7 +234,7 @@ export default function ConversationComponent({
   //     subsequent state changes (`joinSuccess` becoming true). That means
   //     AgoraVoiceAI.init() is called exactly once.
   useEffect(() => {
-    if (!isReady || !joinSuccess) return;
+    if (!isReady || !joinSuccess || !rtmClient || rtmUnavailable) return;
 
     let cancelled = false;
 
@@ -302,10 +328,12 @@ export default function ConversationComponent({
       } catch {}
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isReady, joinSuccess]);
+  }, [isReady, joinSuccess, rtmClient, rtmUnavailable]);
 
   // Raw RTM parsing is kept as a fallback for signaling-level errors and SAL status.
   useEffect(() => {
+    if (!rtmClient) return;
+
     const handleRtmMessage = (event: {
       message: string | Uint8Array;
       publisher: string;
@@ -457,7 +485,9 @@ export default function ConversationComponent({
         joinedUID.toString(),
       );
       await client?.renewToken(rtcToken);
-      await rtmClient.renewToken(rtmToken);
+      if (rtmClient) {
+        await rtmClient.renewToken(rtmToken);
+      }
     } catch (error) {
       console.error('Failed to renew Agora token:', error);
     }
@@ -519,8 +549,18 @@ export default function ConversationComponent({
         </div>
       }
       controls={
+        <div className="flex w-full flex-col items-center gap-2">
+          {speakerBlocked && (
+            <button
+              type="button"
+              onClick={resumeRemoteAudio}
+              className="rounded-full border border-primary bg-primary/10 px-4 py-2 text-sm font-medium text-primary"
+            >
+              Tap to enable speaker
+            </button>
+          )}
         <div
-          className="mx-auto flex w-fit items-center gap-3 rounded-full border border-border bg-card/80 px-4 py-2 backdrop-blur-md"
+          className="mx-auto flex w-fit max-w-full items-center gap-3 rounded-full border border-border bg-card/80 px-4 py-2 backdrop-blur-md"
           role="group"
           aria-label="Audio controls"
         >
@@ -537,6 +577,7 @@ export default function ConversationComponent({
             />
           </div>
           <MicrophoneSelector localMicrophoneTrack={localMicrophoneTrack} />
+        </div>
         </div>
       }
       onEndConversation={handleEndConversation}

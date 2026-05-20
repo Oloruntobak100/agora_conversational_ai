@@ -67,6 +67,7 @@ export default function LandingPage() {
   const [error, setError] = useState<string | null>(null);
   const [agoraData, setAgoraData] = useState<AgoraTokenData | null>(null);
   const [rtmClient, setRtmClient] = useState<RTMClient | null>(null);
+  const [rtmUnavailable, setRtmUnavailable] = useState(false);
   const [agentJoinError, setAgentJoinError] = useState(false);
 
   const handleStartConversation = async () => {
@@ -90,44 +91,44 @@ export default function LandingPage() {
       // 2. Run agent invite and RTM setup in parallel — both only need the token response.
       //    RTM must be ready before ConversationComponent mounts so AgoraVoiceAI
       //    can subscribe immediately. Agent invite is non-fatal.
-      const [agentData, rtm] = await Promise.all([
-        // 2a. Start the AI agent
-        fetch('/api/invite-agent', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            requester_id: responseData.uid,
-            channel_name: responseData.channel,
-          } as ClientStartRequest),
-        })
-          .then(async (res) => {
-            if (!res.ok) {
-              setAgentJoinError(true);
-              return null;
-            }
-            return res.json() as Promise<AgentResponse>;
-          })
-          .catch((err) => {
-            console.error('Failed to start conversation with agent:', err);
+      const agentData = await fetch('/api/invite-agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requester_id: responseData.uid,
+          channel_name: responseData.channel,
+        } as ClientStartRequest),
+      })
+        .then(async (res) => {
+          if (!res.ok) {
             setAgentJoinError(true);
             return null;
-          }),
+          }
+          return res.json() as Promise<AgentResponse>;
+        })
+        .catch((err) => {
+          console.error('Failed to start conversation with agent:', err);
+          setAgentJoinError(true);
+          return null;
+        });
 
-        // 2b. Set up RTM (dynamically imported to keep it client-only)
-        (async () => {
-          const { default: AgoraRTM } = await import('agora-rtm');
-          const rtm: RTMClient = new AgoraRTM.RTM(
-            process.env.NEXT_PUBLIC_AGORA_APP_ID!,
-            responseData.uid,
-          );
-          await rtm.login({ token: responseData.token });
-          await rtm.subscribe(responseData.channel);
-          // console.log('RTM ready, channel:', responseData.channel);
-          return rtm;
-        })(),
-      ]);
+      let rtm: RTMClient | null = null;
+      setRtmUnavailable(false);
+      try {
+        const { default: AgoraRTM } = await import('agora-rtm');
+        const rtmInstance: RTMClient = new AgoraRTM.RTM(
+          process.env.NEXT_PUBLIC_AGORA_APP_ID!,
+          responseData.uid,
+        );
+        await rtmInstance.login({ token: responseData.token });
+        await rtmInstance.subscribe(responseData.channel);
+        rtm = rtmInstance;
+      } catch (rtmErr) {
+        console.error('RTM setup failed (voice may work without transcript):', rtmErr);
+        setRtmUnavailable(true);
+      }
 
-      // 3. All dependencies ready — store state and show conversation
+      // Show conversation when RTC token is ready; RTM is optional for transcript
       setRtmClient(rtm);
       setAgoraData({ ...responseData, agentId: agentData?.agent_id });
       setShowConversation(true);
@@ -224,22 +225,28 @@ export default function LandingPage() {
               error={error}
               onStartConversation={handleStartConversation}
             />
-          ) : agoraData && rtmClient ? (
+          ) : agoraData ? (
             <>
-              {/* Non-fatal invite warning: the browser session can still render even if agent start failed. */}
               {agentJoinError && (
-                <div className="p-3 bg-destructive/10 rounded-md text-destructive text-sm max-w-sm">
+                <div className="mx-4 mt-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
                   Failed to connect with AI agent. The conversation may not work
                   as expected.
                 </div>
               )}
-              {/* Browser-only conversation mount: RTC provider, error boundary, and lazy-loaded call UI. */}
+              {rtmUnavailable && (
+                <div className="mx-4 mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-200">
+                  Live transcript is unavailable on this device. Voice may still
+                  work — allow microphone access and tap the speaker area if you
+                  hear nothing.
+                </div>
+              )}
               <Suspense fallback={<LoadingSkeleton />}>
                 <ErrorBoundary>
                   <AgoraProvider>
                     <ConversationComponent
                       agoraData={agoraData}
                       rtmClient={rtmClient}
+                      rtmUnavailable={rtmUnavailable}
                       onTokenWillExpire={handleTokenWillExpire}
                       onEndConversation={handleEndConversation}
                     />
@@ -257,7 +264,7 @@ export default function LandingPage() {
       </div>
 
       {/* Persistent attribution footer for the pre-call and in-call views. */}
-      <footer className="fixed bottom-0 right-0 z-40 py-4 pr-4 md:py-6 md:pr-6">
+      <footer className="pointer-events-none fixed bottom-0 right-0 z-40 py-4 pr-[max(1rem,env(safe-area-inset-right))] pb-[max(1rem,env(safe-area-inset-bottom))] md:py-6 md:pr-6">
         <div className="flex items-center justify-end gap-2 text-muted-foreground">
           <span className="text-xs font-medium tracking-wide uppercase">
             Powered by
@@ -266,7 +273,7 @@ export default function LandingPage() {
             href="https://agora.io/en/"
             target="_blank"
             rel="noopener noreferrer"
-            className="hover:text-primary transition-colors"
+            className="pointer-events-auto hover:text-primary transition-colors"
             aria-label="Visit Agora's website"
           >
             <Image
