@@ -31,7 +31,8 @@ export type RtmConnectionState = 'connecting' | 'ready' | 'failed';
 
 export interface ConversationComponentProps {
   agoraData: AgoraTokenData;
-  rtmClient: RTMClient | null;
+  /** Required before mount — transcript and AgoraVoiceAI depend on RTM (official quickstart). */
+  rtmClient: RTMClient;
   rtmConnectionState: RtmConnectionState;
   onTokenWillExpire: (uid: string) => Promise<AgoraRenewalTokens>;
   onEndConversation: () => void;

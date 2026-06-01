@@ -98,13 +98,13 @@ pnpm run verify   # doctor + lint + typecheck + API contracts + build
 | Agent never joins | `NEXT_PUBLIC_AGENT_UID` must match `getAgentUid()` / invite route |
 | No transcript | RTM must be enabled on agent (`enable_rtm: true`) |
 
-### Mobile (Chrome / Safari on phone)
+### All browsers (including phones)
 
-- **Transcript above the orb** on small screens — scroll if needed; pipeline chips hide below `sm` width.
-- **Microphone prompt** appears as soon as you tap **Start Conversation** (before the call connects). If you never saw it, check Chrome site settings → Microphone → Allow, reload, and try again. In-call **Allow microphone** appears if the track failed to start.
-- If you hear nothing, tap **Tap to hear agent** (required on most phones for assistant audio).
-- If you see “Live transcript is unavailable”, RTM failed but **voice may still work**.
-- **iOS Safari**: use latest iOS; disable silent mode; prefer Safari over in-app browsers (Instagram, etc.).
+- **Start Conversation** only opens the call after **RTM** (live transcript) connects — same as the [official quickstart](https://github.com/AgoraIO-Conversational-AI/agent-quickstart-nextjs).
+- **Transcript above the orb** on small screens — scroll if needed.
+- **Microphone**: allow when prompted; Chrome → lock icon → Site settings → Microphone → Allow.
+- If you hear nothing after the agent joins, tap **Tap to hear agent** (browser autoplay policy applies on every device).
+- **iOS Safari**: use latest iOS; disable silent mode; prefer Safari over in-app browsers.
 
 See [AGENTS.md](./AGENTS.md) and Agora [DOCS](https://github.com/AgoraIO-Conversational-AI/agent-quickstart-nextjs/tree/main/DOCS).
 

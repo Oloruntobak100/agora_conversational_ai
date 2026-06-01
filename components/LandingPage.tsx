@@ -13,8 +13,9 @@ import type {
 import { ErrorBoundary } from './ErrorBoundary';
 import { LoadingSkeleton } from './LoadingSkeleton';
 import { resumeRtcAudioContext } from '@/lib/audio-playback';
+import { bootstrapRtmClient } from '@/lib/bootstrap-rtm-client';
+import { debugSessionLog } from '@/lib/debug-session-log';
 import { ensureMicrophoneAccess } from '@/lib/microphone-permission';
-import { setupRtmClient } from '@/lib/setup-rtm-client';
 import type { RtmConnectionState } from '@/types/conversation';
 import { QuickstartPreCallCard } from './QuickstartPreCallCard';
 
@@ -24,8 +25,6 @@ const ConversationComponent = dynamic(() => import('./ConversationComponent'), {
 });
 
 // Dynamically import AgoraRTCProvider (browser-only).
-// The AgoraVoiceAI toolkit is initialized inside ConversationComponent after
-// the RTC join succeeds, so this wrapper only needs to provide the RTC client.
 const AgoraProvider = dynamic(
   async () => {
     const { AgoraRTCProvider, default: AgoraRTC } =
@@ -36,8 +35,6 @@ const AgoraProvider = dynamic(
       }: {
         children: React.ReactNode;
       }) {
-        // useRef persists across StrictMode's simulated unmount/remount, so only
-        // one RTC client is ever created per session (useMemo creates two in StrictMode).
         const clientRef = useRef<ReturnType<
           typeof AgoraRTC.createClient
         > | null>(null);
@@ -61,8 +58,6 @@ const AgoraProvider = dynamic(
 export default function LandingPage() {
   const [showConversation, setShowConversation] = useState(false);
 
-  // Preload heavy modules on mount so they're already cached when the user
-  // clicks "Try it Now" — eliminates the ~1.8s dynamic-import delay.
   useEffect(() => {
     import('agora-rtc-react').catch(() => {});
     import('agora-rtm').catch(() => {});
@@ -80,8 +75,6 @@ export default function LandingPage() {
     setError(null);
     setAgentJoinError(false);
 
-    // Must run before any await — mobile browsers only show the mic prompt
-    // while the tap gesture is still active.
     const mic = await ensureMicrophoneAccess();
     if (!mic.ok) {
       setError(mic.message);
@@ -89,15 +82,11 @@ export default function LandingPage() {
       return;
     }
 
-    // Same user gesture — unlock output audio before async work (mobile autoplay).
     await resumeRtcAudioContext();
 
     try {
-      // 1. Fetch RTC token + channel
-      // console.log('Fetching Agora token...');
       const agoraResponse = await fetch('/api/generate-agora-token');
       const responseData = await agoraResponse.json();
-      // console.log('Agora token response: uid =', responseData.uid, 'channel =', responseData.channel);
 
       if (!agoraResponse.ok) {
         throw new Error(
@@ -105,11 +94,10 @@ export default function LandingPage() {
         );
       }
 
-      // 2. Agent invite + RTM in parallel (quickstart pattern). RTM powers transcript.
       setRtmConnectionState('connecting');
       const appId = process.env.NEXT_PUBLIC_AGORA_APP_ID!;
 
-      const [agentData, rtmResult] = await Promise.all([
+      const [agentData, rtm] = await Promise.all([
         fetch('/api/invite-agent', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -131,24 +119,46 @@ export default function LandingPage() {
             return null;
           }),
 
-        setupRtmClient({
+        bootstrapRtmClient({
           appId,
           uid: responseData.uid,
           token: responseData.token,
           channel: responseData.channel,
-        }).catch((rtmErr) => {
-          console.error('RTM setup failed:', rtmErr);
-          return null;
         }),
       ]);
 
-      const rtm = rtmResult as RTMClient | null;
-      setRtmConnectionState(rtm ? 'ready' : 'failed');
+      // #region agent log
+      debugSessionLog({
+        location: 'LandingPage.tsx:bootstrap',
+        message: 'Session bootstrap complete',
+        hypothesisId: 'A',
+        data: {
+          hasRtm: true,
+          agentInviteOk: agentData !== null,
+          channel: responseData.channel,
+        },
+      });
+      // #endregion
+
+      setRtmConnectionState('ready');
       setRtmClient(rtm);
       setAgoraData({ ...responseData, agentId: agentData?.agent_id });
       setShowConversation(true);
     } catch (err) {
-      setError('Failed to start conversation. Please try again.');
+      // #region agent log
+      debugSessionLog({
+        location: 'LandingPage.tsx:bootstrap',
+        message: 'Session bootstrap failed',
+        hypothesisId: 'A',
+        data: {
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+      // #endregion
+      setRtmConnectionState('failed');
+      setError(
+        'Could not connect live transcript. Check your connection and try again.',
+      );
       console.error('Error starting conversation:', err);
     } finally {
       setIsLoading(false);
@@ -163,10 +173,6 @@ export default function LandingPage() {
           throw new Error('Missing channel for token renewal');
         }
 
-        // RTC and RTM tokens are renewed independently:
-        //   - RTC uses the browser client's assigned UID (passed in from ConversationComponent).
-        //   - RTM uses the same UID that was used during RTM login (agoraData.uid).
-        // Both are fetched in parallel to stay within the token-expiry grace-period window.
         const [rtcResponse, rtmResponse] = await Promise.all([
           fetch(`/api/generate-agora-token?channel=${channel}&uid=${uid}`),
           fetch(`/api/generate-agora-token?channel=${channel}&uid=${agoraData.uid}`),
@@ -193,10 +199,8 @@ export default function LandingPage() {
   );
 
   const handleEndConversation = async () => {
-    // Stop the AI agent
     if (agoraData?.agentId) {
       try {
-        // console.log('Stopping agent:', agoraData.agentId);
         const response = await fetch('/api/stop-conversation', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -205,13 +209,11 @@ export default function LandingPage() {
         if (!response.ok) {
           console.error('Failed to stop agent:', await response.text());
         }
-        // else console.log('Agent stopped successfully');
       } catch (error) {
         console.error('Error stopping agent:', error);
       }
     }
 
-    // ConversationComponent also tears down RTM/RTC; this covers early exit paths.
     if (rtmClient && agoraData?.channel) {
       try {
         await rtmClient.unsubscribe(agoraData.channel);
@@ -229,7 +231,6 @@ export default function LandingPage() {
 
   return (
     <div className="relative flex h-dvh min-h-screen flex-col overflow-hidden bg-background text-foreground">
-      {/* Hero shell: either shows the pre-call CTA or swaps in the live conversation experience. */}
       <div
         className={`flex min-h-0 flex-1 flex-col ${
           showConversation
@@ -250,18 +251,12 @@ export default function LandingPage() {
               error={error}
               onStartConversation={handleStartConversation}
             />
-          ) : agoraData ? (
+          ) : agoraData && rtmClient ? (
             <>
               {agentJoinError && (
                 <div className="mx-4 mt-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
                   Failed to connect with AI agent. The conversation may not work
                   as expected.
-                </div>
-              )}
-              {rtmConnectionState === 'failed' && (
-                <div className="mx-4 mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-200">
-                  Live transcript is still connecting. Voice works after you tap
-                  &quot;Tap to hear agent&quot; below if you hear nothing.
                 </div>
               )}
               <Suspense fallback={<LoadingSkeleton />}>
@@ -280,7 +275,6 @@ export default function LandingPage() {
               </Suspense>
             </>
           ) : (
-            /* Fallback if session bootstrap partially succeeded but required state is missing. */
             <p className="text-sm text-muted-foreground">
               Failed to load conversation data.
             </p>
@@ -288,7 +282,6 @@ export default function LandingPage() {
         </div>
       </div>
 
-      {/* Persistent attribution footer for the pre-call and in-call views. */}
       <footer className="pointer-events-none fixed bottom-0 right-0 z-40 py-4 pr-[max(1rem,env(safe-area-inset-right))] pb-[max(1rem,env(safe-area-inset-bottom))] md:py-6 md:pr-6">
         <div className="flex items-center justify-end gap-2 text-muted-foreground">
           <span className="text-xs font-medium tracking-wide uppercase">
