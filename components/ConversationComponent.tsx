@@ -54,6 +54,7 @@ import { isMobileBrowser } from '@/lib/device';
 import { createCloudAgentInviteRunner } from '@/lib/run-cloud-agent-invite';
 import { getRtcJoinReadyDelayMs } from '@/lib/session-bootstrap';
 import { isNexoraSessionPayload } from '@/lib/nexora-session';
+import { useConversationAutoEnd } from '@/hooks/use-conversation-auto-end';
 import type { ConversationComponentProps } from '@/types/conversation';
 
 
@@ -657,6 +658,16 @@ export default function ConversationComponent({
   // INTERRUPTED must be included — if the agent's first turn is cut off,
   // messageList stays empty and the first interrupted turn is never shown.
   const messageList = useMemo(() => getMessageList(transcript), [transcript]);
+
+  useConversationAutoEnd({
+    enabled: joinSuccess && isAgentConnected && Boolean(agoraData.agentId),
+    channel: agoraData.channel,
+    messageList,
+    agentUid: agentUID,
+    agentState,
+    onEnd: onEndConversation,
+    sessionEndHandled,
+  });
 
   const currentInProgressMessage = useMemo(() => {
     // The live partial turn renders separately from the completed history list.

@@ -195,18 +195,23 @@ export default function LandingPage() {
   );
 
   const handleEndConversation = async () => {
-    if (agoraData?.agentId) {
+    if (agoraData?.agentId && agoraData.channel && agoraData.uid) {
       try {
-        const response = await fetch('/api/stop-conversation', {
+        const response = await fetch('/api/end-session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ agent_id: agoraData.agentId }),
+          body: JSON.stringify({
+            agent_id: agoraData.agentId,
+            channel_name: agoraData.channel,
+            requester_id: agoraData.uid,
+            reason: 'user ended',
+          }),
         });
         if (!response.ok) {
-          console.error('Failed to stop agent:', await response.text());
+          console.error('Failed to end session:', await response.text());
         }
       } catch (error) {
-        console.error('Error stopping agent:', error);
+        console.error('Error ending session:', error);
       }
     }
 

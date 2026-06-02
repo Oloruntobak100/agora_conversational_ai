@@ -2,6 +2,10 @@ import { createHmac } from 'node:crypto';
 import { AgoraClient, Agent } from 'agora-agent-server-sdk';
 import { RtcTokenBuilder } from 'agora-token';
 import { NextRequest } from 'next/server';
+import {
+  isAgentFarewellMessage,
+  isUserFarewellMessage,
+} from '../lib/conversation-end';
 import { verifyAgoraWebhookRequest } from '../lib/webhooks/verify-agora-signature';
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -224,6 +228,21 @@ async function verifyStopConversationSuccess() {
   } finally {
     AgoraClient.prototype.stopAgent = originalStopAgent;
   }
+}
+
+function verifyConversationEndHelpers() {
+  assert(
+    isAgentFarewellMessage('Have a wonderful day! Goodbye.'),
+    'isAgentFarewellMessage should detect farewell',
+  );
+  assert(
+    !isAgentFarewellMessage('Just checking in! Are you still there?'),
+    'isAgentFarewellMessage should not treat check-in as farewell',
+  );
+  assert(
+    isUserFarewellMessage("Goodbye. That's all."),
+    'isUserFarewellMessage should detect user goodbye',
+  );
 }
 
 async function verifyAgoraWebhookSignature() {

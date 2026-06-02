@@ -4,6 +4,7 @@ import {
   MiniMaxTTS,
   OpenAI,
 } from "agora-agent-server-sdk";
+import { getSilenceWrapUpContent } from "@/lib/conversation-end";
 import {
   getAgentGreeting,
   getAgoraEnableTools,
@@ -25,7 +26,9 @@ Session context: channel {{channel_name}}, user id {{requester_id}}.
 
 When the user needs live data, lookups, or actions (orders, bookings, CRM, etc.), call the invoke_workflow tool with channel_name, requester_id, and a clear description in args.
 
-When the user is done, says goodbye, or the task is fully complete, give a brief closing line then call end_conversation with channel_name and requester_id (and reason if helpful). Do not keep chatting after calling end_conversation.`;
+When the user says goodbye, says they are done, or the task is complete: say one brief goodbye line, then immediately call end_conversation with channel_name and requester_id. Never keep talking after end_conversation.
+
+After a silence wrap-up where the user confirms they are done (e.g. "I'm good", "that's all"): say a brief goodbye and call end_conversation immediately.`;
 
 export type InviteSessionMeta = {
   channel: string;
@@ -181,8 +184,7 @@ export function buildInviteAgentPipeline(
           ? {
               timeout_ms: silenceMs,
               action: "think",
-              content:
-                "The user has been silent for a while. Briefly check if they are still there or offer to wrap up.",
+              content: getSilenceWrapUpContent(),
             }
           : undefined,
       farewell_config: {
