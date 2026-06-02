@@ -10,6 +10,7 @@ import { LoadingSkeleton } from './LoadingSkeleton';
 import { resumeRtcAudioContext } from '@/lib/audio-playback';
 import { bootstrapRtmClient } from '@/lib/bootstrap-rtm-client';
 import { ensureMicrophoneAccess } from '@/lib/microphone-permission';
+import { shouldDeferAgentInviteToInCall } from '@/lib/session-bootstrap';
 import {
   clearStoredAgentId,
   getStoredAgentId,
@@ -29,6 +30,7 @@ const AgoraProvider = dynamic(
   async () => {
     const { AgoraRTCProvider, default: AgoraRTC } =
       await import('agora-rtc-react');
+    const { useEffect } = await import('react');
     return {
       default: function AgoraProviders({
         children,
@@ -44,6 +46,15 @@ const AgoraProvider = dynamic(
             codec: 'vp8',
           });
         }
+
+        useEffect(() => {
+          const rtc = clientRef.current;
+          return () => {
+            if (!rtc) return;
+            void rtc.leave().catch(() => {});
+          };
+        }, []);
+
         return (
           <AgoraRTCProvider client={clientRef.current}>
             {children}
@@ -61,6 +72,7 @@ export default function LandingPage() {
   useEffect(() => {
     import('agora-rtc-react').catch(() => {});
     import('agora-rtm').catch(() => {});
+    void import('./ConversationComponent');
 
     const onPageHide = () => {
       const agentId = getStoredAgentId();
@@ -111,14 +123,17 @@ export default function LandingPage() {
       setRtmConnectionState('connecting');
       const appId = process.env.NEXT_PUBLIC_AGORA_APP_ID!;
 
-      // Official quickstart: invite agent + RTM in parallel after token (works on Chrome/Edge).
-      // In-call backup invite runs if this step fails.
+      // Desktop: invite + RTM in parallel. Mobile Chrome: RTM first, invite after RTC join
+      // (agent invited into an empty channel before the user joins is a common mobile failure).
+      const deferInvite = shouldDeferAgentInviteToInCall();
       const [agentData, rtm] = await Promise.all([
-        inviteCloudAgent(responseData.uid, responseData.channel).catch((err) => {
-          console.error('Failed to start conversation with agent:', err);
-          setAgentJoinError(true);
-          return null;
-        }),
+        deferInvite
+          ? Promise.resolve(null)
+          : inviteCloudAgent(responseData.uid, responseData.channel).catch((err) => {
+              console.error('Failed to start conversation with agent:', err);
+              setAgentJoinError(true);
+              return null;
+            }),
 
         bootstrapRtmClient({
           appId,

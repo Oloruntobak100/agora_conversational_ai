@@ -1,3 +1,5 @@
+import { getPriorAgentStopSettleMs, sleep } from '@/lib/session-bootstrap';
+
 const ACTIVE_AGENT_KEY = 'nexora-active-agent-id';
 
 export function getStoredAgentId(): string | null {
@@ -30,4 +32,6 @@ export async function stopStoredAgentIfAny(): Promise<void> {
   } catch {
     // Best-effort — new session should still proceed.
   }
+
+  await sleep(getPriorAgentStopSettleMs());
 }

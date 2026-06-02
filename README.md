@@ -108,6 +108,7 @@ pnpm run verify   # doctor + lint + typecheck + API contracts + build
 ### All browsers (including phones)
 
 - **Start Conversation** only opens the call after **RTM** (live transcript) connects — same as the [official quickstart](https://github.com/AgoraIO-Conversational-AI/agent-quickstart-nextjs).
+- **Mobile Chrome / Android**: the cloud agent is invited **after** you join the RTC channel (avoids the agent joining an empty room while the phone is still connecting).
 - **Transcript above the orb** on small screens — scroll if needed.
 - **Microphone**: allow when prompted; Chrome → lock icon → Site settings → Microphone → Allow.
 - If you hear nothing after the agent joins, tap **Tap to hear agent** (browser autoplay policy applies on every device).

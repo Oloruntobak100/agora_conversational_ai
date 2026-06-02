@@ -52,6 +52,7 @@ import type { QuickstartAgentMetric } from './QuickstartPipelineMetrics';
 import { getAgentConnectionPhase } from '@/lib/agent-connection-phase';
 import { isMobileBrowser } from '@/lib/device';
 import { createCloudAgentInviteRunner } from '@/lib/run-cloud-agent-invite';
+import { getRtcJoinReadyDelayMs } from '@/lib/session-bootstrap';
 import type { ConversationComponentProps } from '@/types/conversation';
 
 
@@ -144,7 +145,7 @@ export default function ConversationComponent({
     [],
   );
   const agentWatchdogMs = useMemo(
-    () => (isMobileBrowser() ? 28_000 : 35_000),
+    () => (isMobileBrowser() ? 42_000 : 35_000),
     [],
   );
   const addConnectionIssue = useCallback((issue: ConnectionIssue) => {
@@ -177,11 +178,12 @@ export default function ConversationComponent({
   // setTimeout callback, so the first (fake) mount's timeout is always cancelled.
   // Only the real second mount's timeout fires, meaning useJoin joins exactly once.
   const [isReady, setIsReady] = useState(false);
+  const rtcJoinRetries = useRef(0);
   useEffect(() => {
     let cancelled = false;
     const id = setTimeout(() => {
       if (!cancelled) setIsReady(true);
-    }, 0);
+    }, getRtcJoinReadyDelayMs());
     return () => {
       cancelled = true;
       clearTimeout(id);
@@ -270,6 +272,7 @@ export default function ConversationComponent({
   const rtmReconnectAttempts = useRef(0);
   const agentAudioPlayAttempted = useRef(false);
   const inviteRunnerRef = useRef(createCloudAgentInviteRunner());
+  const inviteStartedForChannel = useRef<string | null>(null);
   const agentWatchdogFired = useRef(false);
   const toolkitSubscribed = useRef(false);
 
@@ -327,14 +330,18 @@ export default function ConversationComponent({
     setConnectionIssues([]);
     agentAudioPlayAttempted.current = false;
     inviteRunnerRef.current.cancel();
+    inviteStartedForChannel.current = null;
     agentWatchdogFired.current = false;
     toolkitSubscribed.current = false;
     rtmReconnectAttempts.current = 0;
+    rtcJoinRetries.current = 0;
   }, [agoraData.channel]);
 
-  // Backup invite if bootstrap did not get an agent id (StrictMode-safe).
+  // Invite when RTC + RTM are up. Required on mobile (deferred from landing); backup on desktop.
   useEffect(() => {
     if (!isReady || !joinSuccess || !activeRtm || agoraData.agentId) return;
+    if (inviteStartedForChannel.current === agoraData.channel) return;
+    inviteStartedForChannel.current = agoraData.channel;
 
     let cancelled = false;
 
@@ -348,13 +355,13 @@ export default function ConversationComponent({
       if (result.ok) {
         onAgentStarted(result.agentId);
       } else {
+        inviteStartedForChannel.current = null;
         onAgentInviteFailed?.();
       }
     })();
 
     return () => {
       cancelled = true;
-      inviteRunnerRef.current.cancel();
     };
   }, [
     isReady,
@@ -695,6 +702,30 @@ export default function ConversationComponent({
       timestamp: Date.now(),
     });
   }, [joinError, addConnectionIssue, agentUID]);
+
+  // Mobile Chrome: recover from transient RTC join failures without a full page refresh.
+  useEffect(() => {
+    if (!isMobileBrowser() || !joinError || !isReady || joinSuccess) return;
+    if (rtcJoinRetries.current >= 2) return;
+
+    const retryId = window.setTimeout(async () => {
+      rtcJoinRetries.current += 1;
+      try {
+        if (client && client.connectionState !== 'DISCONNECTED') {
+          await client.leave();
+        }
+      } catch {
+        // Continue with re-join attempt.
+      }
+      setIsReady(false);
+      window.setTimeout(
+        () => setIsReady(true),
+        getRtcJoinReadyDelayMs() + 100,
+      );
+    }, 2_000);
+
+    return () => window.clearTimeout(retryId);
+  }, [joinError, isReady, joinSuccess, client]);
 
   const connectionSeverity = useMemo<'normal' | 'warning' | 'error'>(() => {
     // RTC transport problems take precedence; otherwise derive severity from captured issues.
