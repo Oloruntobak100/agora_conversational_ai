@@ -77,7 +77,18 @@ export async function POST(request: NextRequest) {
         try {
           await session.say(greeting);
         } catch (greetingError) {
-          console.error("[invite-agent] delayed greeting failed:", greetingError);
+          const conflict =
+            greetingError &&
+            typeof greetingError === "object" &&
+            "body" in greetingError &&
+            typeof (greetingError as { body?: { reason?: string } }).body
+              ?.reason === "string" &&
+            (greetingError as { body: { reason: string } }).body.reason
+              .toLowerCase()
+              .includes("not in a running state");
+          if (!conflict) {
+            console.error("[invite-agent] delayed greeting failed:", greetingError);
+          }
         }
       });
     }

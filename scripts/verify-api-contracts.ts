@@ -246,7 +246,7 @@ function verifyConversationEndHelpers() {
   );
   assert(
     isInternalTranscriptMessage(
-      'The user has been silent. Say one short sentence wishing them a great day.',
+      'The user has been quiet for a while. Ask one brief, friendly question.',
     ),
     'isInternalTranscriptMessage should hide silence think prompts',
   );

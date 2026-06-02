@@ -18,6 +18,7 @@ import {
   stopStoredAgentIfAny,
 } from '@/lib/session-agent-storage';
 import type { RtmConnectionState } from '@/types/conversation';
+import { publishNexoraSessionEndFromClient } from '@/lib/publish-nexora-session-end-client';
 import { QuickstartPreCallCard } from './QuickstartPreCallCard';
 
 // Dynamically import the ConversationComponent with ssr disabled
@@ -216,6 +217,15 @@ export default function LandingPage() {
     }
 
     if (rtmClient && agoraData?.channel) {
+      try {
+        await publishNexoraSessionEndFromClient(
+          rtmClient,
+          agoraData.channel,
+          'user ended',
+        );
+      } catch (err) {
+        console.warn('RTM session end signal failed:', err);
+      }
       try {
         await rtmClient.unsubscribe(agoraData.channel);
         await rtmClient.logout();

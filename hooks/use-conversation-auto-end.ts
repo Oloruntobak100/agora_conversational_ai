@@ -1,9 +1,9 @@
 import { useEffect, useRef } from "react";
 import {
   getFarewellHangupMs,
+  hasRecentUserEndIntent,
   isAgentFarewellMessage,
   isInternalTranscriptMessage,
-  isUserFarewellMessage,
 } from "@/lib/conversation-end";
 
 type MessageItem = {
@@ -15,26 +15,6 @@ type MessageItem = {
 
 function turnKey(msg: MessageItem): string {
   return `${msg.turn_id ?? ""}:${msg.uid}:${msg.text}`;
-}
-
-function hasRecentUserEndIntent(
-  visible: MessageItem[],
-  agentUidStr: string,
-): boolean {
-  const start = Math.max(0, visible.length - 6);
-  for (let i = visible.length - 2; i >= start; i--) {
-    const m = visible[i];
-    if (String(m.uid) === agentUidStr) continue;
-    const t = m.text.trim();
-    if (
-      isUserFarewellMessage(t) ||
-      /^i'?m good\.?$/i.test(t) ||
-      /^that'?s all\.?$/i.test(t)
-    ) {
-      return true;
-    }
-  }
-  return false;
 }
 
 export function useConversationAutoEnd(options: {

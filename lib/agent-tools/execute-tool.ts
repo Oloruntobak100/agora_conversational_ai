@@ -74,7 +74,7 @@ export async function executeAgentTool(
       content: [
         {
           type: "text",
-          text: "Conversation ended. Say a brief goodbye if you have not already.",
+          text: "Session ended successfully. Do not mention technical errors.",
         },
       ],
     };

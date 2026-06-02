@@ -54,7 +54,10 @@ import { isMobileBrowser } from '@/lib/device';
 import { createCloudAgentInviteRunner } from '@/lib/run-cloud-agent-invite';
 import { getRtcJoinReadyDelayMs } from '@/lib/session-bootstrap';
 import { isNexoraSessionPayload } from '@/lib/nexora-session';
-import { isInternalTranscriptMessage } from '@/lib/conversation-end';
+import {
+  hasRecentUserEndIntent,
+  isInternalTranscriptMessage,
+} from '@/lib/conversation-end';
 import { useConversationAutoEnd } from '@/hooks/use-conversation-auto-end';
 import type { ConversationComponentProps } from '@/types/conversation';
 
@@ -279,6 +282,9 @@ export default function ConversationComponent({
   const agentWatchdogFired = useRef(false);
   const toolkitSubscribed = useRef(false);
   const sessionEndHandled = useRef(false);
+  const messageListRef = useRef<
+    { uid: number; text: string; createdAt?: number }[]
+  >([]);
 
   // Retry RTM in-call when bootstrap failed (common on mobile / incognito).
   useEffect(() => {
@@ -501,7 +507,12 @@ export default function ConversationComponent({
         }
 
         ai.on(AgoraVoiceAIEvents.TRANSCRIPT_UPDATED, (t) => {
-          setRawTranscript([...t]);
+          const filtered = t.filter((item) => {
+            const text =
+              typeof item.text === 'string' ? item.text : String(item.text ?? '');
+            return !isInternalTranscriptMessage(text);
+          });
+          setRawTranscript([...filtered]);
         });
         // Agent state drives the visualizer, independent of RTC audio presence.
         ai.on(AgoraVoiceAIEvents.AGENT_STATE_CHANGED, (_, event) =>
@@ -662,6 +673,7 @@ export default function ConversationComponent({
     () => getVisibleMessageList(transcript),
     [transcript],
   );
+  messageListRef.current = messageList;
 
   useConversationAutoEnd({
     enabled: joinSuccess && isAgentConnected && Boolean(agoraData.agentId),
@@ -706,7 +718,13 @@ export default function ConversationComponent({
   });
 
   useClientEvent(client, 'user-left', (user) => {
-    if (user.uid.toString() === agentUID) setIsAgentConnected(false);
+    if (user.uid.toString() !== agentUID) return;
+    setIsAgentConnected(false);
+    if (sessionEndHandled.current) return;
+    if (!hasRecentUserEndIntent(messageListRef.current, agentUID)) return;
+    sessionEndHandled.current = true;
+    console.info('[auto-end] agent left after user goodbye');
+    onEndConversation();
   });
 
   // Sync isAgentConnected with remoteUsers (covers cases where user-joined/left are missed)
