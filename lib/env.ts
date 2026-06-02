@@ -154,7 +154,7 @@ export function getSilenceTimeoutMs(): number {
   if (Number.isFinite(parsed) && parsed >= 0) {
     return Math.min(parsed, 60_000);
   }
-  return 25_000;
+  return 5_000;
 }
 
 export function getIdleTimeoutSec(): number {

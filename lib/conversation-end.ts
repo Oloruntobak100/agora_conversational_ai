@@ -31,7 +31,7 @@ export function getFarewellHangupMs(): number {
   if (Number.isFinite(parsed) && parsed >= 500) {
     return Math.min(parsed, 30_000);
   }
-  return 2_500;
+  return 5_000;
 }
 
 /** Client safety net if end_conversation never runs after silence wrap-up. */
@@ -41,5 +41,6 @@ export function getSilenceForceEndMs(): number {
   if (Number.isFinite(parsed) && parsed >= 3_000) {
     return Math.min(parsed, 120_000);
   }
-  return 15_000;
+  // Default: 5s silence trigger + time for agent goodbye TTS
+  return 12_000;
 }
