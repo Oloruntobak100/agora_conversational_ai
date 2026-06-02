@@ -13,6 +13,8 @@ type AgentConnectionOverlayProps = {
   phase: AgentConnectionPhase;
   showStuck: boolean;
   onRefresh: () => void;
+  /** User gesture during wait — unlocks audio on strict mobile browsers. */
+  onInteract?: () => void;
 };
 
 const MESSAGES: Record<AgentConnectionPhase, string> = {
@@ -26,6 +28,7 @@ export function AgentConnectionOverlay({
   phase,
   showStuck,
   onRefresh,
+  onInteract,
 }: AgentConnectionOverlayProps) {
   if (phase === 'ready' && !showStuck) return null;
 
@@ -39,6 +42,15 @@ export function AgentConnectionOverlay({
       role="status"
       aria-live="polite"
       aria-busy={!showStuck}
+      onClick={!showStuck ? onInteract : undefined}
+      onKeyDown={
+        !showStuck && onInteract
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') onInteract();
+            }
+          : undefined
+      }
+      tabIndex={!showStuck && onInteract ? 0 : undefined}
     >
       {!showStuck && (
         <div className="relative flex h-16 w-16 items-center justify-center">
@@ -55,7 +67,9 @@ export function AgentConnectionOverlay({
         <p className="text-sm font-medium text-foreground">{message}</p>
         {!showStuck && (
           <p className="mt-1.5 text-xs text-muted-foreground">
-            This usually takes a few seconds
+            {onInteract
+              ? 'Tap anywhere here if audio is silent after connecting'
+              : 'This usually takes a few seconds'}
           </p>
         )}
         {showStuck && (

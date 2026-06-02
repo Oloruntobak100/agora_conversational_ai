@@ -1,6 +1,6 @@
 import type { RTMClient } from 'agora-rtm';
 
-const RTM_RETRY_DELAYS_MS = [0, 400, 1200, 2000, 3000];
+const RTM_RETRY_DELAYS_MS = [0, 400, 1200, 2000, 3000, 4000, 6000, 8000];
 
 export async function setupRtmClient(options: {
   appId: string;

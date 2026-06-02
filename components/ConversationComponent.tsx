@@ -51,9 +51,10 @@ import { QuickstartConversationLayout } from './QuickstartConversationLayout';
 import { QuickstartTranscriptPanel } from './QuickstartTranscriptPanel';
 import type { QuickstartAgentMetric } from './QuickstartPipelineMetrics';
 import { getAgentConnectionPhase } from '@/lib/agent-connection-phase';
+import { isMobileBrowser } from '@/lib/device';
+import { markSession, resetSessionTiming } from '@/lib/session-timing';
 import type { ConversationComponentProps } from '@/types/conversation';
 
-const AGENT_CONNECT_TIMEOUT_MS = 45_000;
 
 // Cap the displayed issues list to avoid overwhelming the UI during a cascade of errors.
 const MAX_CONNECTION_ISSUES = 6;
@@ -142,6 +143,14 @@ export default function ConversationComponent({
   );
   const [showConnectionStuck, setShowConnectionStuck] = useState(false);
   const connectionWaitStartedAt = useRef<number | null>(null);
+  const agentConnectTimeoutMs = useMemo(
+    () => (isMobileBrowser() ? 35_000 : 45_000),
+    [],
+  );
+  const agentWatchdogMs = useMemo(
+    () => (isMobileBrowser() ? 16_000 : 22_000),
+    [],
+  );
   const addConnectionIssue = useCallback((issue: ConnectionIssue) => {
     setConnectionIssues((prev) => {
       const isDuplicate = prev.some(
@@ -263,6 +272,7 @@ export default function ConversationComponent({
   const rtmReconnectAttempts = useRef(0);
   const agentAudioPlayAttempted = useRef(false);
   const agentInviteStarted = useRef(false);
+  const agentWatchdogFired = useRef(false);
   const toolkitSubscribed = useRef(false);
   const transcriptLogged = useRef(false);
 
@@ -334,10 +344,132 @@ export default function ConversationComponent({
     setConnectionIssues([]);
     agentAudioPlayAttempted.current = false;
     agentInviteStarted.current = false;
+    agentWatchdogFired.current = false;
     toolkitSubscribed.current = false;
     rtmReconnectAttempts.current = 0;
     transcriptLogged.current = false;
+    resetSessionTiming();
   }, [agoraData.channel]);
+
+  useEffect(() => {
+    if (joinSuccess) {
+      markSession('rtc_joined', 'H2', {
+        connectionState,
+        remoteCount: remoteUsers.length,
+      });
+    }
+  }, [joinSuccess, connectionState, remoteUsers.length]);
+
+  // Invite cloud agent in parallel with toolkit init (do not wait for AgoraVoiceAI.init).
+  useEffect(() => {
+    if (!isReady || !joinSuccess || !activeRtm || agoraData.agentId) return;
+    if (agentInviteStarted.current) return;
+
+    agentInviteStarted.current = true;
+    let cancelled = false;
+
+    (async () => {
+      markSession('invite_parallel_start', 'H1');
+      const agentResponse = await inviteCloudAgent(
+        agoraData.uid,
+        agoraData.channel,
+      );
+      if (cancelled) return;
+
+      markSession('invite_parallel_done', 'H1', {
+        ok: Boolean(agentResponse?.agent_id),
+      });
+
+      if (agentResponse?.agent_id) {
+        onAgentStarted(agentResponse.agent_id);
+      } else {
+        agentInviteStarted.current = false;
+        onAgentInviteFailed?.();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isReady,
+    joinSuccess,
+    activeRtm,
+    agoraData.agentId,
+    agoraData.uid,
+    agoraData.channel,
+    onAgentStarted,
+    onAgentInviteFailed,
+  ]);
+
+  // Agent invited but never appears in RTC — re-invite once (common on mobile Chrome).
+  useEffect(() => {
+    if (
+      !joinSuccess ||
+      !activeRtm ||
+      !agoraData.agentId ||
+      isAgentConnected ||
+      agentInviteFailed
+    ) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+      if (isAgentConnected || agentWatchdogFired.current) return;
+      agentWatchdogFired.current = true;
+
+      markSession('agent_watchdog', 'H3', { agentId: agoraData.agentId });
+
+      try {
+        await fetch('/api/stop-conversation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agent_id: agoraData.agentId }),
+        });
+      } catch {
+        // continue with fresh invite
+      }
+
+      agentInviteStarted.current = false;
+      const agentResponse = await inviteCloudAgent(
+        agoraData.uid,
+        agoraData.channel,
+      );
+
+      if (agentResponse?.agent_id) {
+        onAgentStarted(agentResponse.agent_id);
+      } else {
+        onAgentInviteFailed?.();
+      }
+    }, agentWatchdogMs);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    joinSuccess,
+    activeRtm,
+    isAgentConnected,
+    agentInviteFailed,
+    agoraData.agentId,
+    agoraData.uid,
+    agoraData.channel,
+    agentWatchdogMs,
+    onAgentStarted,
+    onAgentInviteFailed,
+  ]);
+
+  useEffect(() => {
+    if (remoteUsers.length === 0) return;
+    debugSessionLog({
+      location: 'ConversationComponent.tsx:remoteUsers',
+      message: 'Remote users updated',
+      hypothesisId: 'H3',
+      data: {
+        uids: remoteUsers.map((u) => u.uid.toString()),
+        agentUID,
+        isAgentConnected,
+      },
+    });
+  }, [remoteUsers, agentUID, isAgentConnected]);
 
   const unlockAgentSpeaker = useCallback(async () => {
     const played = await playAgentRemoteAudio(remoteUsers, agentUID);
@@ -478,6 +610,7 @@ export default function ConversationComponent({
         });
         ai.subscribeMessage(agoraData.channel);
         toolkitSubscribed.current = true;
+        markSession('toolkit_subscribed', 'H4');
 
         // #region agent log
         debugSessionLog({
@@ -487,33 +620,6 @@ export default function ConversationComponent({
           data: { channel: agoraData.channel, hasActiveRtm: !!activeRtm },
         });
         // #endregion
-
-        if (!agoraData.agentId && !agentInviteStarted.current) {
-          agentInviteStarted.current = true;
-          const agentResponse = await inviteCloudAgent(
-            agoraData.uid,
-            agoraData.channel,
-          );
-          if (cancelled) return;
-
-          if (agentResponse?.agent_id) {
-            // #region agent log
-            debugSessionLog({
-              location: 'ConversationComponent.tsx:deferredInvite',
-              message: 'Cloud agent invited after client ready',
-              hypothesisId: 'G',
-              data: {
-                agentId: agentResponse.agent_id,
-                joinSuccess: true,
-              },
-            });
-            // #endregion
-            onAgentStarted(agentResponse.agent_id);
-          } else {
-            agentInviteStarted.current = false;
-            onAgentInviteFailed?.();
-          }
-        }
       } catch (error) {
         if (!cancelled) {
           // #region agent log
@@ -637,6 +743,7 @@ export default function ConversationComponent({
 
     setIsAgentConnected(true);
     agentAudioPlayAttempted.current = false;
+    markSession('agent_rtc_joined', 'H2', { uid: user.uid.toString() });
 
     try {
       const ai = AgoraVoiceAI.getInstance();
@@ -756,17 +863,23 @@ export default function ConversationComponent({
     const intervalId = window.setInterval(() => {
       const started = connectionWaitStartedAt.current;
       if (!started) return;
-      if (Date.now() - started >= AGENT_CONNECT_TIMEOUT_MS) {
+      if (Date.now() - started >= agentConnectTimeoutMs) {
         setShowConnectionStuck(true);
       }
     }, 1000);
 
     return () => window.clearInterval(intervalId);
-  }, [agentInviteFailed, isAgentSessionReady, joinSuccess]);
+  }, [agentInviteFailed, isAgentSessionReady, joinSuccess, agentConnectTimeoutMs]);
 
   const handleRefreshSession = useCallback(() => {
     window.location.reload();
   }, []);
+
+  const handleOverlayInteract = useCallback(() => {
+    void resumeRtcAudioContext();
+    void unlockAgentSpeaker();
+    markSession('overlay_tap', 'H5');
+  }, [unlockAgentSpeaker]);
 
   // Subtitles can work while remote audio is still blocked — recover on speech.
   useEffect(() => {
@@ -913,6 +1026,7 @@ export default function ConversationComponent({
             phase={connectionPhase}
             showStuck={showConnectionStuck || agentInviteFailed}
             onRefresh={handleRefreshSession}
+            onInteract={handleOverlayInteract}
           />
           {remoteUsers.map((user) => (
             <div key={user.uid} className="hidden">

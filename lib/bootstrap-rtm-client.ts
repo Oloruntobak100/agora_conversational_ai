@@ -1,4 +1,6 @@
 import type { RTMClient } from 'agora-rtm';
+import { isMobileBrowser } from '@/lib/device';
+import { markSession } from '@/lib/session-timing';
 import { setupRtmClient } from '@/lib/setup-rtm-client';
 
 /**
@@ -12,8 +14,12 @@ export async function bootstrapRtmClient(options: {
   token: string;
   channel: string;
 }): Promise<RTMClient> {
-  return setupRtmClient({
+  const mobile = isMobileBrowser();
+  markSession('rtm_bootstrap_start', 'H4', { mobile });
+  const rtm = await setupRtmClient({
     ...options,
-    maxAttempts: 5,
+    maxAttempts: mobile ? 8 : 5,
   });
+  markSession('rtm_bootstrap_done', 'H4', { mobile });
+  return rtm;
 }

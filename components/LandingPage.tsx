@@ -16,6 +16,7 @@ import {
   setStoredAgentId,
   stopStoredAgentIfAny,
 } from '@/lib/session-agent-storage';
+import { markSession, resetSessionTiming } from '@/lib/session-timing';
 import type { RtmConnectionState } from '@/types/conversation';
 import { QuickstartPreCallCard } from './QuickstartPreCallCard';
 
@@ -97,6 +98,8 @@ export default function LandingPage() {
 
     await resumeRtcAudioContext();
     await stopStoredAgentIfAny();
+    resetSessionTiming();
+    markSession('start_click', 'T');
 
     try {
       const agoraResponse = await fetch('/api/generate-agora-token');
