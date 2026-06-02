@@ -59,7 +59,6 @@ import {
   isInternalTranscriptMessage,
 } from '@/lib/conversation-end';
 import { useConversationAutoEnd } from '@/hooks/use-conversation-auto-end';
-import { debugSessionLog } from '@/lib/debug-session-log';
 import type { ConversationComponentProps } from '@/types/conversation';
 
 
@@ -931,13 +930,6 @@ export default function ConversationComponent({
   useClientEvent(client, 'token-privilege-will-expire', handleTokenWillExpire);
 
   const handleEndConversation = useCallback(async () => {
-    // #region agent log
-    debugSessionLog('H2', 'ConversationComponent.tsx:handleEndConversation', 'teardown start', {
-      channel: agoraData.channel,
-      hasAgentId: Boolean(agoraData.agentId),
-      joinSuccess,
-    });
-    // #endregion
     const tracks = [localMicrophoneTrack, fallbackMicTrack].filter(Boolean);
     for (const track of tracks) {
       if (!track) continue;
@@ -982,11 +974,6 @@ export default function ConversationComponent({
       console.warn('RTC leave failed:', error);
     }
 
-    // #region agent log
-    debugSessionLog('H2', 'ConversationComponent.tsx:handleEndConversation', 'calling parent onEndConversation', {
-      channel: agoraData.channel,
-    });
-    // #endregion
     onEndConversation();
   }, [
     client,

@@ -4,8 +4,6 @@ import {
   isInternalTranscriptMessage,
   isUserEndIntent,
 } from "@/lib/conversation-end";
-import { debugSessionLog } from "@/lib/debug-session-log";
-
 type MessageItem = {
   turn_id?: string | number;
   uid: number;
@@ -72,25 +70,12 @@ export function useConversationAutoEnd(options: {
       if (options.sessionEndHandled.current) return;
       options.sessionEndHandled.current = true;
       clearHangupTimer();
-      debugSessionLog("H3", "use-conversation-auto-end.ts:fire", "hangup fired", {
-        reason,
-        delayMs,
-        lastUserEndIndex,
-        agentReplied,
-      });
       console.info("[auto-end]", reason);
       void Promise.resolve(options.onEnd());
     };
 
     const schedule = (reason: string, delayMs: number) => {
       clearHangupTimer();
-      debugSessionLog("H1", "use-conversation-auto-end.ts:schedule", "hangup scheduled", {
-        reason,
-        delayMs,
-        lastUserEndIndex,
-        agentReplied,
-        previousUserEndIndex: userEndIndexRef.current,
-      });
       hangupTimerRef.current = window.setTimeout(
         () => fireEnd(reason, delayMs),
         delayMs,
