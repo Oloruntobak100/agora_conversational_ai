@@ -24,6 +24,9 @@
 .DS_Store
 *.pem
 
+# cursor debug sessions
+.cursor/debug-*.log
+
 # debug
 npm-debug.log*
 yarn-debug.log*
