@@ -45,14 +45,15 @@ import {
   getConversationIssueSeverity,
   type ConnectionIssue,
 } from './ConversationErrorCard';
+import { AgentConnectionOverlay } from './AgentConnectionOverlay';
 import { ConnectionStatusPanel } from './ConnectionStatusPanel';
 import { QuickstartConversationLayout } from './QuickstartConversationLayout';
-import {
-  QuickstartPipelineMetrics,
-  type QuickstartAgentMetric,
-} from './QuickstartPipelineMetrics';
 import { QuickstartTranscriptPanel } from './QuickstartTranscriptPanel';
+import type { QuickstartAgentMetric } from './QuickstartPipelineMetrics';
+import { getAgentConnectionPhase } from '@/lib/agent-connection-phase';
 import type { ConversationComponentProps } from '@/types/conversation';
+
+const AGENT_CONNECT_TIMEOUT_MS = 45_000;
 
 // Cap the displayed issues list to avoid overwhelming the UI during a cascade of errors.
 const MAX_CONNECTION_ISSUES = 6;
@@ -107,6 +108,7 @@ export default function ConversationComponent({
   onEndConversation,
   onAgentStarted,
   onAgentInviteFailed,
+  agentInviteFailed = false,
 }: ConversationComponentProps) {
   const client = useRTCClient();
   const remoteUsers = useRemoteUsers();
@@ -138,6 +140,8 @@ export default function ConversationComponent({
   const [connectionIssues, setConnectionIssues] = useState<ConnectionIssue[]>(
     [],
   );
+  const [showConnectionStuck, setShowConnectionStuck] = useState(false);
+  const connectionWaitStartedAt = useRef<number | null>(null);
   const addConnectionIssue = useCallback((issue: ConnectionIssue) => {
     setConnectionIssues((prev) => {
       const isDuplicate = prev.some(
@@ -707,6 +711,78 @@ export default function ConversationComponent({
     [agentState, isAgentConnected, connectionState],
   );
 
+  const connectionPhase = useMemo(
+    () =>
+      getAgentConnectionPhase({
+        joinSuccess,
+        connectionState,
+        rtmReady: rtmState === 'ready',
+        hasAgentId: Boolean(agoraData.agentId),
+        isAgentConnected,
+      }),
+    [
+      joinSuccess,
+      connectionState,
+      rtmState,
+      agoraData.agentId,
+      isAgentConnected,
+    ],
+  );
+
+  const isAgentSessionReady = connectionPhase === 'ready';
+
+  useEffect(() => {
+    if (agentInviteFailed) {
+      setShowConnectionStuck(true);
+      return;
+    }
+
+    if (isAgentSessionReady) {
+      setShowConnectionStuck(false);
+      connectionWaitStartedAt.current = null;
+      return;
+    }
+
+    if (!joinSuccess) {
+      connectionWaitStartedAt.current = null;
+      setShowConnectionStuck(false);
+      return;
+    }
+
+    if (!connectionWaitStartedAt.current) {
+      connectionWaitStartedAt.current = Date.now();
+    }
+
+    const intervalId = window.setInterval(() => {
+      const started = connectionWaitStartedAt.current;
+      if (!started) return;
+      if (Date.now() - started >= AGENT_CONNECT_TIMEOUT_MS) {
+        setShowConnectionStuck(true);
+      }
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [agentInviteFailed, isAgentSessionReady, joinSuccess]);
+
+  const handleRefreshSession = useCallback(() => {
+    window.location.reload();
+  }, []);
+
+  // Subtitles can work while remote audio is still blocked — recover on speech.
+  useEffect(() => {
+    if (agentState === 'speaking' || agentState === 'thinking') {
+      void unlockAgentSpeaker();
+    }
+  }, [agentState, unlockAgentSpeaker]);
+
+  useEffect(() => {
+    if (!isAgentConnected || !speakerBlocked) return;
+    const last = messageList[messageList.length - 1];
+    if (last && String(last.uid) === agentUID) {
+      void unlockAgentSpeaker();
+    }
+  }, [messageList, isAgentConnected, speakerBlocked, agentUID, unlockAgentSpeaker]);
+
   /**
    * Mute/unmute via track.setEnabled() only — usePublish owns publish state.
    * If we also unpublish in the toggle, usePublish and the button fight each other
@@ -805,10 +881,7 @@ export default function ConversationComponent({
   ]);
 
   const showSpeakerPrompt =
-    joinSuccess && isAgentConnected && speakerBlocked;
-
-  const isStartingAgent =
-    joinSuccess && !agoraData.agentId && !isAgentConnected;
+    isAgentSessionReady && isAgentConnected && speakerBlocked;
 
   return (
     <QuickstartConversationLayout
@@ -822,7 +895,6 @@ export default function ConversationComponent({
           onToggle={() => setIsConnectionDetailsOpen((open) => !open)}
         />
       }
-      pipelineMetrics={<QuickstartPipelineMetrics metrics={agentMetrics} />}
       transcriptPanel={
         <QuickstartTranscriptPanel
           messageList={messageList}
@@ -837,6 +909,11 @@ export default function ConversationComponent({
           aria-label="AI agent status visualization"
         >
           <AgentVisualizer state={visualizerState} size="lg" />
+          <AgentConnectionOverlay
+            phase={connectionPhase}
+            showStuck={showConnectionStuck || agentInviteFailed}
+            onRefresh={handleRefreshSession}
+          />
           {remoteUsers.map((user) => (
             <div key={user.uid} className="hidden">
               <RemoteUser user={user} />
@@ -860,25 +937,20 @@ export default function ConversationComponent({
               )}
             </div>
           )}
-          {rtmState === 'connecting' && (
-            <p className="px-4 text-center text-xs text-muted-foreground">
-              Connecting live transcript…
-            </p>
-          )}
-          {isStartingAgent && (
-            <p className="px-4 text-center text-xs text-muted-foreground">
-              Starting voice agent…
-            </p>
-          )}
           {showSpeakerPrompt && (
             <button
               type="button"
               onClick={() => void unlockAgentSpeaker()}
               className="w-full max-w-sm rounded-xl border-2 border-primary bg-primary px-5 py-3 text-base font-semibold text-black shadow-lg active:scale-[0.98]"
             >
-              Tap to hear agent
+              Tap to hear response
             </button>
           )}
+        <div
+          className={
+            isAgentSessionReady ? '' : 'pointer-events-none opacity-40'
+          }
+        >
         <div
           className="mx-auto flex w-fit max-w-full items-center gap-3 rounded-full border border-border bg-card/80 px-4 py-2 backdrop-blur-md"
           role="group"
@@ -897,6 +969,7 @@ export default function ConversationComponent({
             />
           </div>
           <MicrophoneSelector localMicrophoneTrack={activeMicTrack} />
+        </div>
         </div>
         </div>
       }

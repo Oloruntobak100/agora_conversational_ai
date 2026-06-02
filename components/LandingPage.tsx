@@ -2,7 +2,6 @@
 
 import { useState, useRef, Suspense, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-import Image from 'next/image';
 import type { RTMClient } from 'agora-rtm';
 import type { AgoraTokenData, AgoraRenewalTokens } from '../types/conversation';
 import { ErrorBoundary } from './ErrorBoundary';
@@ -255,12 +254,6 @@ export default function LandingPage() {
             />
           ) : agoraData && rtmClient ? (
             <>
-              {agentJoinError && (
-                <div className="mx-4 mt-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-                  Failed to connect with AI agent. The conversation may not work
-                  as expected.
-                </div>
-              )}
               <Suspense fallback={<LoadingSkeleton />}>
                 <ErrorBoundary>
                   <AgoraProvider key={agoraData.channel}>
@@ -273,6 +266,7 @@ export default function LandingPage() {
                       onEndConversation={handleEndConversation}
                       onAgentStarted={handleAgentStarted}
                       onAgentInviteFailed={handleAgentInviteFailed}
+                      agentInviteFailed={agentJoinError}
                     />
                   </AgoraProvider>
                 </ErrorBoundary>
@@ -285,31 +279,6 @@ export default function LandingPage() {
           )}
         </div>
       </div>
-
-      <footer className="pointer-events-none fixed bottom-0 right-0 z-40 py-4 pr-[max(1rem,env(safe-area-inset-right))] pb-[max(1rem,env(safe-area-inset-bottom))] md:py-6 md:pr-6">
-        <div className="flex items-center justify-end gap-2 text-muted-foreground">
-          <span className="text-xs font-medium tracking-wide uppercase">
-            Powered by
-          </span>
-          <a
-            href="https://agora.io/en/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="pointer-events-auto hover:text-primary transition-colors"
-            aria-label="Visit Agora's website"
-          >
-            <Image
-              src="/agora-logo-rgb-blue.svg"
-              alt="Agora"
-              width={86}
-              height={24}
-              priority
-              className="h-6 w-auto hover:opacity-80 transition-opacity translate-y-1"
-            />
-            <span className="sr-only">Agora</span>
-          </a>
-        </div>
-      </footer>
     </div>
   );
 }

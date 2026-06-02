@@ -48,8 +48,9 @@ export function mapAgentVisualizerState(
     return 'joining';
   }
 
+  // RTC is up but the cloud agent has not appeared yet — show "joining", not "not joined".
   if (!isAgentConnected) {
-    return 'not-joined';
+    return 'joining';
   }
 
   switch (agentState) {

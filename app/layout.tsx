@@ -10,8 +10,7 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: "Nexora Voice Assistant",
-  description:
-    "Real-time voice AI with live transcript and low latency via Agora Conversational AI.",
+  description: "Real-time voice AI with live transcript.",
 };
 
 export default function RootLayout({

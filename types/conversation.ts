@@ -39,4 +39,5 @@ export interface ConversationComponentProps {
   /** Called after RTC+RTM are ready and the cloud agent has been invited. */
   onAgentStarted: (agentId: string) => void;
   onAgentInviteFailed?: () => void;
+  agentInviteFailed?: boolean;
 }
