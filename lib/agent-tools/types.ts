@@ -15,6 +15,9 @@ export type ToolRequest = z.infer<typeof toolRequestSchema>;
 export const n8nToolResponseSchema = z.object({
   speak: z.string().optional(),
   endSession: z.boolean().optional(),
+  branch: z.string().optional(),
+  toolLabel: z.string().optional(),
+  toolIcon: z.string().optional(),
   data: z.record(z.string(), z.unknown()).optional(),
 });
 

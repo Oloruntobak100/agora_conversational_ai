@@ -49,18 +49,50 @@ Optional:
 | `endSession` | If `true`, Nexora stops the agent and sends RTM `nexora.session` end |
 | `data` | Opaque payload (logged / future UI) |
 
+### n8n Switch node (single webhook)
+
+1. Webhook → **Switch** on `{{ $json.intent }}` or `{{ $json.args.intent }}`
+2. Output `send_email` → email branch → **Respond to Webhook**
+3. Output `lookup_order` → order branch → **Respond to Webhook**
+
+Example voice: *"Send an email to support"* → agent calls `invoke_workflow` with `args.intent: "send_email"`.
+
+The Nexora UI shows a green **Tool activated** banner when the webhook returns successfully (polls `/api/tool-events`).
+
 ### Incoming payload from Nexora
 
 ```json
 {
   "tool": "invoke_workflow",
-  "args": { "query": "order 123" },
+  "intent": "send_email",
+  "args": { "intent": "send_email", "to": "user@example.com", "subject": "Hello" },
   "sessionId": "channel-name",
   "channel": "channel-name",
   "requesterId": "4321",
   "agentId": "cloud-agent-id"
 }
 ```
+
+Use **`intent`** (or `args.intent`) in an n8n **Switch** node to route branches, e.g. `send_email`, `lookup_order`, `book_appointment`.
+
+### Respond to Webhook (include UI banner fields)
+
+```json
+{
+  "speak": "Your email has been sent.",
+  "branch": "send_email",
+  "toolLabel": "Email tool called",
+  "toolIcon": "✉️",
+  "endSession": false,
+  "data": {}
+}
+```
+
+| Field | Purpose |
+|-------|---------|
+| `branch` | Switch branch id (shown in UI + logs) |
+| `toolLabel` | Banner headline, e.g. "Email tool called" |
+| `toolIcon` | Emoji or short icon string for the in-call banner |
 
 Validate `X-Webhook-Secret` in n8n (IF node or Function) when `N8N_WEBHOOK_SECRET` is set.
 

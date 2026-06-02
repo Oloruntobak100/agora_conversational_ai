@@ -5,6 +5,7 @@ import {
 } from "@/lib/env";
 import { parseN8nToolResponse } from "./n8n-response";
 import type { ToolRequest } from "./types";
+import { resolveWorkflowIntent } from "@/lib/tool-branch-event";
 
 export async function dispatchN8nWorkflow(
   request: ToolRequest,
@@ -28,9 +29,12 @@ export async function dispatchN8nWorkflow(
     headers["X-Webhook-Secret"] = secret;
   }
 
+  const intent = resolveWorkflowIntent(request.args);
+
   const body = {
     tool: request.tool,
     args: request.args ?? {},
+    intent,
     sessionId: request.sessionId ?? request.channel,
     turnId: request.turnId,
     channel: request.channel,

@@ -2,6 +2,11 @@ import { dispatchN8nWorkflow } from "./dispatch-n8n";
 import { endConversationSession } from "./end-conversation";
 import { formatToolResultForMcp } from "./n8n-response";
 import { getSessionToolContext } from "@/lib/session-tool-context";
+import { pushToolBranchEvent } from "@/lib/session-tool-events";
+import {
+  buildToolBranchEvent,
+  resolveWorkflowIntent,
+} from "@/lib/tool-branch-event";
 import type { ToolExecutionResult, ToolRequest } from "./types";
 
 function resolveSessionIds(
@@ -102,6 +107,20 @@ export async function executeAgentTool(
     }
 
     const { parsed } = n8nResult;
+    const intent = resolveWorkflowIntent(request.args);
+
+    if (session?.channel) {
+      const display = buildToolBranchEvent(parsed, {
+        fallbackBranch: workflowKey,
+        intent,
+      });
+      pushToolBranchEvent(session.channel, display);
+      console.info("[invoke_workflow]", {
+        channel: session.channel,
+        branch: display.branch,
+        label: display.label,
+      });
+    }
 
     if (parsed.endSession && session) {
       await endConversationSession({

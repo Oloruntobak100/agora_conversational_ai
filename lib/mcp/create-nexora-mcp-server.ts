@@ -12,7 +12,9 @@ const invokeWorkflowSchema = {
   args: z
     .record(z.string(), z.unknown())
     .optional()
-    .describe("Workflow payload"),
+    .describe(
+      "Workflow payload; include intent (e.g. send_email, lookup_order) for n8n routing",
+    ),
 };
 
 const endConversationSchema = {

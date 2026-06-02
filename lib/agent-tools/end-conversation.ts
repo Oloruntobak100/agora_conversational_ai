@@ -4,6 +4,7 @@ import {
   getAgoraAppId,
 } from "@/lib/env";
 import { clearSessionToolContext } from "@/lib/session-tool-context";
+import { clearToolBranchEvents } from "@/lib/session-tool-events";
 
 export async function endConversationSession(options: {
   agentId: string;
@@ -30,6 +31,7 @@ export async function endConversationSession(options: {
   }
 
   clearSessionToolContext(channel);
+  clearToolBranchEvents(channel);
 
   console.info("[end-conversation]", { agentId, channel, requesterId, reason });
 

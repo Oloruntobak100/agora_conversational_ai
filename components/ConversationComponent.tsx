@@ -48,6 +48,7 @@ import { AgentConnectionOverlay } from './AgentConnectionOverlay';
 import { ConnectionStatusPanel } from './ConnectionStatusPanel';
 import { QuickstartConversationLayout } from './QuickstartConversationLayout';
 import { QuickstartTranscriptPanel } from './QuickstartTranscriptPanel';
+import { WorkflowToolBannerStack } from './WorkflowToolBanner';
 import type { QuickstartAgentMetric } from './QuickstartPipelineMetrics';
 import { getAgentConnectionPhase } from '@/lib/agent-connection-phase';
 import { isMobileBrowser } from '@/lib/device';
@@ -60,6 +61,7 @@ import {
 } from '@/lib/conversation-end';
 import { useConversationAutoEnd } from '@/hooks/use-conversation-auto-end';
 import type { ConversationComponentProps } from '@/types/conversation';
+import type { ToolBranchEvent } from '@/lib/session-tool-events';
 
 
 // Cap the displayed issues list to avoid overwhelming the UI during a cascade of errors.
@@ -145,6 +147,10 @@ export default function ConversationComponent({
     [],
   );
   const [showConnectionStuck, setShowConnectionStuck] = useState(false);
+  const [toolBranchEvents, setToolBranchEvents] = useState<ToolBranchEvent[]>(
+    [],
+  );
+  const toolEventsSinceRef = useRef(0);
   const connectionWaitStartedAt = useRef<number | null>(null);
   const agentConnectTimeoutMs = useMemo(
     () => (isMobileBrowser() ? 35_000 : 45_000),
@@ -344,6 +350,8 @@ export default function ConversationComponent({
     agentWatchdogFired.current = false;
     toolkitSubscribed.current = false;
     sessionEndHandled.current = false;
+    toolEventsSinceRef.current = 0;
+    setToolBranchEvents([]);
     rtmReconnectAttempts.current = 0;
     rtcJoinRetries.current = 0;
   }, [agoraData.channel]);
@@ -995,11 +1003,58 @@ export default function ConversationComponent({
     sessionEndHandled,
   });
 
+  useEffect(() => {
+    if (!joinSuccess || !agoraData.channel) return;
+
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const since = toolEventsSinceRef.current;
+        const res = await fetch(
+          `/api/tool-events?channel=${encodeURIComponent(agoraData.channel)}&since=${since}`,
+        );
+        if (!res.ok || cancelled) return;
+        const body = (await res.json()) as { events?: ToolBranchEvent[] };
+        const events = body.events ?? [];
+        if (events.length === 0 || cancelled) return;
+
+        toolEventsSinceRef.current = Math.max(
+          toolEventsSinceRef.current,
+          ...events.map((e) => e.at),
+        );
+        setToolBranchEvents((prev) => {
+          const seen = new Set(prev.map((e) => e.id));
+          const next = events.filter((e) => !seen.has(e.id));
+          return next.length ? [...prev, ...next] : prev;
+        });
+      } catch {
+        // Ignore poll errors during call.
+      }
+    };
+
+    void poll();
+    const id = window.setInterval(poll, 1_500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [joinSuccess, agoraData.channel]);
+
+  const dismissToolBranchEvent = useCallback((id: string) => {
+    setToolBranchEvents((prev) => prev.filter((e) => e.id !== id));
+  }, []);
+
   const showSpeakerPrompt =
     isAgentSessionReady && isAgentConnected && speakerBlocked;
 
   return (
-    <QuickstartConversationLayout
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <WorkflowToolBannerStack
+        events={toolBranchEvents}
+        onDismiss={dismissToolBranchEvent}
+      />
+      <QuickstartConversationLayout
       rtmState={rtmState}
       statusPanel={
         <ConnectionStatusPanel
@@ -1091,5 +1146,6 @@ export default function ConversationComponent({
       }
       onEndConversation={handleEndConversation}
     />
+    </div>
   );
 }
