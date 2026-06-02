@@ -4,12 +4,6 @@ export type AgentConnectionPhase =
   | 'waiting-for-agent'
   | 'ready';
 
-const RTC_CONNECTING = new Set([
-  'CONNECTING',
-  'RECONNECTING',
-  'DISCONNECTING',
-]);
-
 export function getAgentConnectionPhase(options: {
   joinSuccess: boolean;
   connectionState: string;
@@ -24,7 +18,13 @@ export function getAgentConnectionPhase(options: {
     return 'ready';
   }
 
-  if (!joinSuccess || RTC_CONNECTING.has(connectionState)) {
+  // useJoin is authoritative once the channel join completes. connection-state-change
+  // can lag or never fire (Chrome) and may report transient DISCONNECTING while joined.
+  if (!joinSuccess) {
+    return 'rtc-connecting';
+  }
+
+  if (connectionState === 'DISCONNECTED') {
     return 'rtc-connecting';
   }
 

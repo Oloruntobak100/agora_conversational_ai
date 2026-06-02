@@ -57,7 +57,6 @@ export function buildInviteAgentPipeline(
         apiKey: llmApiKey,
         url: getLlmUrl(),
         model: "gpt-4o-mini",
-        greetingMessage: greeting,
         failureMessage: "Please wait a moment.",
         maxHistory: 15,
         params: {
@@ -68,7 +67,6 @@ export function buildInviteAgentPipeline(
       })
     : new OpenAI({
         model: "gpt-4o-mini",
-        greetingMessage: greeting,
         failureMessage: "Please wait a moment.",
         maxHistory: 15,
         params: {
@@ -95,7 +93,6 @@ export function buildInviteAgentPipeline(
   const agent = new Agent({
     name,
     instructions: NEXORA_SYSTEM_PROMPT,
-    greeting,
     failureMessage: "Please wait a moment.",
     maxHistory: 32,
     turnDetection: {

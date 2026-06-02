@@ -8,6 +8,7 @@ import AgoraRTC, {
   useClientEvent,
   useJoin,
   usePublish,
+  useConnectionState,
   RemoteUser,
   UID,
 } from 'agora-rtc-react';
@@ -123,9 +124,6 @@ export default function ConversationComponent({
     Awaited<ReturnType<typeof AgoraRTC.createMicrophoneAudioTrack>> | null
   >(null);
 
-  // Tracks granular RTC connection state for the status dot.
-  // Agora states: DISCONNECTED | CONNECTING | CONNECTED | DISCONNECTING | RECONNECTING
-  const [connectionState, setConnectionState] = useState<string>('CONNECTING');
   const agentUID =
     process.env.NEXT_PUBLIC_AGENT_UID ?? String(DEFAULT_AGENT_UID);
   const [joinedUID, setJoinedUID] = useState<UID>(0);
@@ -191,7 +189,7 @@ export default function ConversationComponent({
     };
   }, []);
 
-  const { isConnected: joinSuccess } = useJoin(
+  const { isConnected: joinSuccess, error: joinError } = useJoin(
     {
       appid: process.env.NEXT_PUBLIC_AGORA_APP_ID!,
       channel: agoraData.channel,
@@ -200,6 +198,8 @@ export default function ConversationComponent({
     },
     isReady,
   );
+
+  const connectionState = useConnectionState(client);
 
   // Create mic track only after the StrictMode fake-unmount cycle completes (isReady).
   // Passing `true` here creates two tracks in StrictMode — the first publishes, then
@@ -678,9 +678,23 @@ export default function ConversationComponent({
     setIsAgentConnected(isAgentInRemoteUsers);
   }, [remoteUsers, agentUID]);
 
-  useClientEvent(client, 'connection-state-change', (curState) => {
-    setConnectionState(curState);
-  });
+  useEffect(() => {
+    if (!joinError) return;
+    const rtcCode =
+      typeof joinError.rtcError === 'object' &&
+      joinError.rtcError &&
+      'code' in joinError.rtcError
+        ? String((joinError.rtcError as { code: string }).code)
+        : 'JOIN_FAILED';
+    addConnectionIssue({
+      id: `${Date.now()}-rtc-join`,
+      source: 'rtc',
+      agentUserId: agentUID,
+      code: rtcCode,
+      message: joinError.message || 'Failed to join voice channel',
+      timestamp: Date.now(),
+    });
+  }, [joinError, addConnectionIssue, agentUID]);
 
   const connectionSeverity = useMemo<'normal' | 'warning' | 'error'>(() => {
     // RTC transport problems take precedence; otherwise derive severity from captured issues.
@@ -740,7 +754,7 @@ export default function ConversationComponent({
   const isAgentSessionReady = connectionPhase === 'ready';
 
   useEffect(() => {
-    if (agentInviteFailed) {
+    if (agentInviteFailed || joinError) {
       setShowConnectionStuck(true);
       return;
     }
@@ -751,7 +765,7 @@ export default function ConversationComponent({
       return;
     }
 
-    if (!joinSuccess) {
+    if (!isReady) {
       connectionWaitStartedAt.current = null;
       setShowConnectionStuck(false);
       return;
@@ -770,7 +784,13 @@ export default function ConversationComponent({
     }, 1000);
 
     return () => window.clearInterval(intervalId);
-  }, [agentInviteFailed, isAgentSessionReady, joinSuccess, agentConnectTimeoutMs]);
+  }, [
+    agentInviteFailed,
+    isAgentSessionReady,
+    isReady,
+    joinError,
+    agentConnectTimeoutMs,
+  ]);
 
   const handleRefreshSession = useCallback(() => {
     window.location.reload();

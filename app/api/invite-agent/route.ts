@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
 import { AgoraClient, Area, ExpiresIn } from "agora-agent-server-sdk";
 import type { AgentResponse, ClientStartRequest } from "@/types/conversation";
 import {
+  getAgentGreetingDelayMs,
   getAgentUid,
   getAgoraAppCertificate,
   getAgoraAppId,
@@ -61,12 +63,26 @@ export async function POST(request: NextRequest) {
 
     const agentId = await session.start();
 
+    const { greeting } = config;
+    if (greeting) {
+      const delayMs = getAgentGreetingDelayMs();
+      after(async () => {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        try {
+          await session.say(greeting);
+        } catch (greetingError) {
+          console.error("[invite-agent] delayed greeting failed:", greetingError);
+        }
+      });
+    }
+
     console.info("[invite-agent]", {
       channel: channel_name,
       agentId,
       agentUid,
       requester_id,
       byok: config.byok,
+      greetingDelayMs: greeting ? getAgentGreetingDelayMs() : 0,
     });
 
     return NextResponse.json({

@@ -40,6 +40,17 @@ export function getAgentGreeting(): string {
   );
 }
 
+/** Delay before the agent speaks its opening line after joining (ms). */
+export function getAgentGreetingDelayMs(): number {
+  const raw =
+    process.env.NEXT_AGENT_GREETING_DELAY_MS?.trim() ||
+    process.env.AGENT_GREETING_DELAY_MS?.trim();
+  if (!raw) return 5_000;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return 5_000;
+  return Math.min(parsed, 60_000);
+}
+
 /** BYOK: OpenAI (or OpenAI-compatible) LLM — fixes cloud agent LLM 401 errors. */
 export function getLlmApiKey(): string | undefined {
   return (

@@ -43,7 +43,8 @@ Set in **Production** and **Preview**:
 | `NEXT_PUBLIC_AGORA_APP_ID` | Yes | Console → App ID |
 | `NEXT_AGORA_APP_CERTIFICATE` | Yes | Console → App Certificate (server only) |
 | `NEXT_PUBLIC_AGENT_UID` | No | Default `123456`; must match server invite |
-| `NEXT_AGENT_GREETING` | No | Opening line |
+| `NEXT_AGENT_GREETING` | No | Opening line (spoken after delay, not on join) |
+| `NEXT_AGENT_GREETING_DELAY_MS` | No | Default `5000` — wait before opening line |
 | `NEXT_LLM_API_KEY` | **Yes (production)** | OpenAI API key — cloud agent LLM (fixes error 505 / LLM 401) |
 | `NEXT_LLM_URL` | No | Default `https://api.openai.com/v1/chat/completions` |
 | `NEXT_DEEPGRAM_API_KEY` | No | BYOK STT if needed |

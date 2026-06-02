@@ -2,7 +2,7 @@ import React from 'react';
 
 export type ConnectionIssue = {
   id: string;
-  source: 'rtm' | 'agent' | 'rtm-signaling';
+  source: 'rtm' | 'agent' | 'rtm-signaling' | 'rtc';
   agentUserId: string;
   code: string | number;
   message: string;

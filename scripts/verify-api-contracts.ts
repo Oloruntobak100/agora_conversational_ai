@@ -104,6 +104,7 @@ async function verifyInviteAgentSuccess() {
     };
     return {
       start: async () => 'mock-agent-id',
+      say: async () => {},
     };
   }) as unknown as typeof Agent.prototype.createSession;
 
