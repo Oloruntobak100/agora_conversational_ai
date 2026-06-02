@@ -3,7 +3,6 @@ import {
   getAgoraAppCertificate,
   getAgoraAppId,
 } from "@/lib/env";
-import { publishRtmSessionEnd } from "@/lib/publish-rtm-signal";
 import { clearSessionToolContext } from "@/lib/session-tool-context";
 
 export async function endConversationSession(options: {
@@ -28,12 +27,6 @@ export async function endConversationSession(options: {
     if (!message.toLowerCase().includes("shutting down")) {
       return { ok: false, error: message };
     }
-  }
-
-  try {
-    await publishRtmSessionEnd({ channel, reason });
-  } catch (rtmError) {
-    console.warn("[end-conversation] RTM signal failed:", rtmError);
   }
 
   clearSessionToolContext(channel);

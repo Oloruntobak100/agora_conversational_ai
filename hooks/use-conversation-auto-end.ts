@@ -1,9 +1,8 @@
 import { useEffect, useRef } from "react";
 import {
   getFarewellHangupMs,
-  hasRecentUserEndIntent,
-  isAgentFarewellMessage,
   isInternalTranscriptMessage,
+  isUserFarewellMessage,
 } from "@/lib/conversation-end";
 
 type MessageItem = {
@@ -13,8 +12,11 @@ type MessageItem = {
   createdAt?: number;
 };
 
-function turnKey(msg: MessageItem): string {
-  return `${msg.turn_id ?? ""}:${msg.uid}:${msg.text}`;
+function isUserEndIntent(text: string): boolean {
+  const t = text.trim();
+  return (
+    isUserFarewellMessage(t) || /end conversation/i.test(t) || /^bye\.?$/i.test(t)
+  );
 }
 
 export function useConversationAutoEnd(options: {
@@ -25,10 +27,10 @@ export function useConversationAutoEnd(options: {
   onEnd: () => void;
   sessionEndHandled: React.MutableRefObject<boolean>;
 }): void {
-  const scheduledFarewellKey = useRef<string | null>(null);
+  const scheduledKey = useRef<string | null>(null);
 
   useEffect(() => {
-    scheduledFarewellKey.current = null;
+    scheduledKey.current = null;
   }, [options.channel]);
 
   useEffect(() => {
@@ -37,25 +39,36 @@ export function useConversationAutoEnd(options: {
     const visible = options.messageList.filter(
       (m) => !isInternalTranscriptMessage(m.text ?? ""),
     );
-    if (visible.length === 0) return;
 
-    const last = visible[visible.length - 1];
     const agentUidStr = options.agentUid;
+    let lastUserEndIndex = -1;
+    for (let i = visible.length - 1; i >= 0; i--) {
+      if (String(visible[i].uid) === agentUidStr) continue;
+      if (isUserEndIntent(visible[i].text)) {
+        lastUserEndIndex = i;
+        break;
+      }
+    }
+    if (lastUserEndIndex < 0) return;
 
-    if (String(last.uid) !== agentUidStr) return;
-    if (!isAgentFarewellMessage(last.text)) return;
+    const afterGoodbye = visible.slice(lastUserEndIndex + 1);
+    const agentReplied = afterGoodbye.some(
+      (m) => String(m.uid) === agentUidStr,
+    );
 
-    if (!hasRecentUserEndIntent(visible, agentUidStr)) return;
+    const scheduleKey = `${lastUserEndIndex}-${afterGoodbye.length}`;
+    if (scheduledKey.current === scheduleKey) return;
+    scheduledKey.current = scheduleKey;
 
-    const key = turnKey(last);
-    if (scheduledFarewellKey.current === key) return;
-    scheduledFarewellKey.current = key;
+    const delayMs = agentReplied ? getFarewellHangupMs() : 5_000;
 
-    const delayMs = getFarewellHangupMs();
     const id = window.setTimeout(() => {
       if (options.sessionEndHandled.current) return;
       options.sessionEndHandled.current = true;
-      console.info("[auto-end] farewell exchange complete, ending session");
+      console.info("[auto-end] user ended call, closing session", {
+        agentReplied,
+        delayMs,
+      });
       options.onEnd();
     }, delayMs);
 

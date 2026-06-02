@@ -3,6 +3,9 @@ export function isInternalTranscriptMessage(text: string): boolean {
   const t = text.trim();
   if (!t) return true;
   if (/the user has been (silent|quiet)/i.test(t)) return true;
+  if (/ask one brief, friendly question to see if they are still there/i.test(t)) {
+    return true;
+  }
   if (/do not say goodbye unless they clearly want to end/i.test(t)) return true;
   if (/end_conversation with channel_name/i.test(t)) return true;
   if (/do not ask another question/i.test(t)) return true;

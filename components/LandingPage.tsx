@@ -196,49 +196,52 @@ export default function LandingPage() {
   );
 
   const handleEndConversation = async () => {
-    if (agoraData?.agentId && agoraData.channel && agoraData.uid) {
-      try {
+    const snapshot = agoraData;
+    const rtm = rtmClient;
+
+    try {
+      if (snapshot?.agentId && snapshot.channel && snapshot.uid) {
         const response = await fetch('/api/end-session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            agent_id: agoraData.agentId,
-            channel_name: agoraData.channel,
-            requester_id: agoraData.uid,
+            agent_id: snapshot.agentId,
+            channel_name: snapshot.channel,
+            requester_id: snapshot.uid,
             reason: 'user ended',
           }),
         });
         if (!response.ok) {
           console.error('Failed to end session:', await response.text());
         }
-      } catch (error) {
-        console.error('Error ending session:', error);
       }
-    }
 
-    if (rtmClient && agoraData?.channel) {
-      try {
-        await publishNexoraSessionEndFromClient(
-          rtmClient,
-          agoraData.channel,
-          'user ended',
-        );
-      } catch (err) {
-        console.warn('RTM session end signal failed:', err);
+      if (rtm && snapshot?.channel) {
+        try {
+          await publishNexoraSessionEndFromClient(
+            rtm,
+            snapshot.channel,
+            'user ended',
+          );
+        } catch (err) {
+          console.warn('RTM session end signal failed:', err);
+        }
+        try {
+          await rtm.unsubscribe(snapshot.channel);
+          await rtm.logout();
+        } catch (err) {
+          console.error('RTM logout error:', err);
+        }
       }
-      try {
-        await rtmClient.unsubscribe(agoraData.channel);
-        await rtmClient.logout();
-      } catch (err) {
-        console.error('RTM logout error:', err);
-      }
+    } catch (error) {
+      console.error('Error ending session:', error);
+    } finally {
+      clearStoredAgentId();
+      setRtmClient(null);
+      setRtmConnectionState('connecting');
+      setAgoraData(null);
+      setShowConversation(false);
     }
-
-    clearStoredAgentId();
-    setRtmClient(null);
-    setRtmConnectionState('connecting');
-    setAgoraData(null);
-    setShowConversation(false);
   };
 
   const handleAgentStarted = useCallback((agentId: string) => {
