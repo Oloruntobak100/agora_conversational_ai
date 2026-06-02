@@ -9,7 +9,6 @@ import { ErrorBoundary } from './ErrorBoundary';
 import { LoadingSkeleton } from './LoadingSkeleton';
 import { resumeRtcAudioContext } from '@/lib/audio-playback';
 import { bootstrapRtmClient } from '@/lib/bootstrap-rtm-client';
-import { debugSessionLog } from '@/lib/debug-session-log';
 import { ensureMicrophoneAccess } from '@/lib/microphone-permission';
 import {
   clearStoredAgentId,
@@ -17,7 +16,6 @@ import {
   setStoredAgentId,
   stopStoredAgentIfAny,
 } from '@/lib/session-agent-storage';
-import { markSession, resetSessionTiming } from '@/lib/session-timing';
 import type { RtmConnectionState } from '@/types/conversation';
 import { QuickstartPreCallCard } from './QuickstartPreCallCard';
 
@@ -99,8 +97,6 @@ export default function LandingPage() {
 
     await resumeRtcAudioContext();
     await stopStoredAgentIfAny();
-    resetSessionTiming();
-    markSession('start_click', 'T');
 
     try {
       const agoraResponse = await fetch('/api/generate-agora-token');
@@ -132,19 +128,6 @@ export default function LandingPage() {
         }),
       ]);
 
-      // #region agent log
-      debugSessionLog({
-        location: 'LandingPage.tsx:bootstrap',
-        message: 'Token, RTM, and parallel agent invite complete',
-        hypothesisId: 'H1',
-        data: {
-          hasRtm: true,
-          agentInviteOk: agentData !== null,
-          channel: responseData.channel,
-        },
-      });
-      // #endregion
-
       setRtmConnectionState('ready');
       setRtmClient(rtm);
       setAgoraData({
@@ -153,16 +136,6 @@ export default function LandingPage() {
       });
       setShowConversation(true);
     } catch (err) {
-      // #region agent log
-      debugSessionLog({
-        location: 'LandingPage.tsx:bootstrap',
-        message: 'Session bootstrap failed',
-        hypothesisId: 'A',
-        data: {
-          error: err instanceof Error ? err.message : String(err),
-        },
-      });
-      // #endregion
       setRtmConnectionState('failed');
       setError(
         'Could not connect live transcript. Check your connection and try again.',

@@ -61,17 +61,6 @@ export async function POST(request: NextRequest) {
 
     const agentId = await session.start();
 
-    // #region agent log
-    console.info("[invite-agent][debug-3cbf76]", {
-      hypothesisId: "F",
-      message: "Agent started",
-      channel: channel_name,
-      agentId,
-      byok: config.byok,
-      hasLlmKey: !!llmApiKey,
-    });
-    // #endregion
-
     console.info("[invite-agent]", {
       channel: channel_name,
       agentId,

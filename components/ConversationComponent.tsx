@@ -28,7 +28,6 @@ import {
   playAgentRemoteAudio,
   resumeRtcAudioContext,
 } from '@/lib/audio-playback';
-import { debugSessionLog } from '@/lib/debug-session-log';
 import { ensureMicrophoneAccess } from '@/lib/microphone-permission';
 import { setupRtmClient } from '@/lib/setup-rtm-client';
 import type { RtmConnectionState } from '@/types/conversation';
@@ -52,7 +51,6 @@ import type { QuickstartAgentMetric } from './QuickstartPipelineMetrics';
 import { getAgentConnectionPhase } from '@/lib/agent-connection-phase';
 import { isMobileBrowser } from '@/lib/device';
 import { createCloudAgentInviteRunner } from '@/lib/run-cloud-agent-invite';
-import { markSession, resetSessionTiming } from '@/lib/session-timing';
 import type { ConversationComponentProps } from '@/types/conversation';
 
 
@@ -274,7 +272,6 @@ export default function ConversationComponent({
   const inviteRunnerRef = useRef(createCloudAgentInviteRunner());
   const agentWatchdogFired = useRef(false);
   const toolkitSubscribed = useRef(false);
-  const transcriptLogged = useRef(false);
 
   // Retry RTM in-call when bootstrap failed (common on mobile / incognito).
   useEffect(() => {
@@ -296,13 +293,6 @@ export default function ConversationComponent({
         if (!cancelled) {
           setActiveRtm(rtm);
           setRtmState('ready');
-          // #region agent log
-          debugSessionLog({
-            location: 'ConversationComponent.tsx:rtmReconnect',
-            message: 'In-call RTM reconnect succeeded',
-            hypothesisId: 'B',
-          });
-          // #endregion
         }
       } catch (err) {
         console.error('In-call RTM reconnect failed:', err);
@@ -325,13 +315,6 @@ export default function ConversationComponent({
 
   useEffect(() => {
     AgoraRTC.onAutoplayFailed = () => {
-      // #region agent log
-      debugSessionLog({
-        location: 'ConversationComponent.tsx:onAutoplayFailed',
-        message: 'Browser blocked remote audio autoplay',
-        hypothesisId: 'C',
-      });
-      // #endregion
       setSpeakerBlocked(true);
     };
     return () => {
@@ -347,18 +330,7 @@ export default function ConversationComponent({
     agentWatchdogFired.current = false;
     toolkitSubscribed.current = false;
     rtmReconnectAttempts.current = 0;
-    transcriptLogged.current = false;
-    resetSessionTiming();
   }, [agoraData.channel]);
-
-  useEffect(() => {
-    if (joinSuccess) {
-      markSession('rtc_joined', 'H2', {
-        connectionState,
-        remoteCount: remoteUsers.length,
-      });
-    }
-  }, [joinSuccess, connectionState, remoteUsers.length]);
 
   // Backup invite if bootstrap did not get an agent id (StrictMode-safe).
   useEffect(() => {
@@ -370,7 +342,6 @@ export default function ConversationComponent({
       const result = await inviteRunnerRef.current.invite(
         agoraData.uid,
         agoraData.channel,
-        'after_rtc_join',
       );
       if (cancelled) return;
 
@@ -412,8 +383,6 @@ export default function ConversationComponent({
       if (isAgentConnected || agentWatchdogFired.current) return;
       agentWatchdogFired.current = true;
 
-      markSession('agent_watchdog', 'H3', { agentId: agoraData.agentId });
-
       try {
         await fetch('/api/stop-conversation', {
           method: 'POST',
@@ -428,7 +397,6 @@ export default function ConversationComponent({
       const result = await inviteRunnerRef.current.invite(
         agoraData.uid,
         agoraData.channel,
-        'watchdog',
       );
 
       if (result.ok) {
@@ -452,30 +420,8 @@ export default function ConversationComponent({
     onAgentInviteFailed,
   ]);
 
-  useEffect(() => {
-    if (remoteUsers.length === 0) return;
-    debugSessionLog({
-      location: 'ConversationComponent.tsx:remoteUsers',
-      message: 'Remote users updated',
-      hypothesisId: 'H3',
-      data: {
-        uids: remoteUsers.map((u) => u.uid.toString()),
-        agentUID,
-        isAgentConnected,
-      },
-    });
-  }, [remoteUsers, agentUID, isAgentConnected]);
-
   const unlockAgentSpeaker = useCallback(async () => {
     const played = await playAgentRemoteAudio(remoteUsers, agentUID);
-    // #region agent log
-    debugSessionLog({
-      location: 'ConversationComponent.tsx:unlockAgentSpeaker',
-      message: 'Agent audio play attempt',
-      hypothesisId: 'C',
-      data: { played, remoteUserCount: remoteUsers.length },
-    });
-    // #endregion
     setSpeakerBlocked(!played);
     return played;
   }, [remoteUsers, agentUID]);
@@ -543,17 +489,6 @@ export default function ConversationComponent({
         }
 
         ai.on(AgoraVoiceAIEvents.TRANSCRIPT_UPDATED, (t) => {
-          if (!transcriptLogged.current && t.length > 0) {
-            transcriptLogged.current = true;
-            // #region agent log
-            debugSessionLog({
-              location: 'ConversationComponent.tsx:TRANSCRIPT_UPDATED',
-              message: 'First transcript event received',
-              hypothesisId: 'E',
-              data: { turnCount: t.length },
-            });
-            // #endregion
-          }
           setRawTranscript([...t]);
         });
         // Agent state drives the visualizer, independent of RTC audio presence.
@@ -605,28 +540,8 @@ export default function ConversationComponent({
         });
         ai.subscribeMessage(agoraData.channel);
         toolkitSubscribed.current = true;
-        markSession('toolkit_subscribed', 'H4');
-
-        // #region agent log
-        debugSessionLog({
-          location: 'ConversationComponent.tsx:AgoraVoiceAI',
-          message: 'AgoraVoiceAI initialized and subscribed',
-          hypothesisId: 'A',
-          data: { channel: agoraData.channel, hasActiveRtm: !!activeRtm },
-        });
-        // #endregion
       } catch (error) {
         if (!cancelled) {
-          // #region agent log
-          debugSessionLog({
-            location: 'ConversationComponent.tsx:AgoraVoiceAI',
-            message: 'AgoraVoiceAI init failed',
-            hypothesisId: 'A',
-            data: {
-              error: error instanceof Error ? error.message : String(error),
-            },
-          });
-          // #endregion
           console.error('[AgoraVoiceAI] init failed:', error);
         }
       }
@@ -738,7 +653,6 @@ export default function ConversationComponent({
 
     setIsAgentConnected(true);
     agentAudioPlayAttempted.current = false;
-    markSession('agent_rtc_joined', 'H2', { uid: user.uid.toString() });
 
     try {
       const ai = AgoraVoiceAI.getInstance();
@@ -749,14 +663,6 @@ export default function ConversationComponent({
       // Toolkit may not be initialized yet on very fast agent join.
     }
 
-    // #region agent log
-    debugSessionLog({
-      location: 'ConversationComponent.tsx:user-joined',
-      message: 'Agent joined RTC channel',
-      hypothesisId: 'D',
-      data: { agentUID },
-    });
-    // #endregion
     void unlockAgentSpeaker();
   });
 
@@ -873,7 +779,6 @@ export default function ConversationComponent({
   const handleOverlayInteract = useCallback(() => {
     void resumeRtcAudioContext();
     void unlockAgentSpeaker();
-    markSession('overlay_tap', 'H5');
   }, [unlockAgentSpeaker]);
 
   // Subtitles can work while remote audio is still blocked — recover on speech.
