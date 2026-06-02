@@ -12,6 +12,25 @@ export function isInternalTranscriptMessage(text: string): boolean {
   return false;
 }
 
+/** Short processing phrases — not a real closing line. */
+export function isAgentFillerPhrase(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  return /^(one moment|just a second|just a sec|hang on|bear with me)\.?$/i.test(
+    t,
+  ) || /^let me think( about that)?\.?$/i.test(t);
+}
+
+/** Agent gave a real closing line (not filler / check-in). */
+export function isAgentClosingReply(text: string): boolean {
+  const t = text.trim();
+  if (!t || isAgentFillerPhrase(t)) return false;
+  if (isAgentFarewellMessage(t)) return true;
+  return /^(bye|goodbye|good bye|take care|see you|thanks|thank you)\.?$/i.test(
+    t,
+  );
+}
+
 /** Agent lines that indicate the call should end (not a check-in). */
 export function isAgentFarewellMessage(text: string): boolean {
   const t = text.trim();
@@ -87,7 +106,7 @@ export function getFarewellHangupMs(): number {
   if (Number.isFinite(parsed) && parsed >= 500) {
     return Math.min(parsed, 30_000);
   }
-  return 2_000;
+  return 2_800;
 }
 
 /** Long idle safety net — only real user silence, not internal prompts. */

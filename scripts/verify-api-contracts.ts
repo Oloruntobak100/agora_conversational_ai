@@ -3,7 +3,9 @@ import { AgoraClient, Agent } from 'agora-agent-server-sdk';
 import { RtcTokenBuilder } from 'agora-token';
 import { NextRequest } from 'next/server';
 import {
+  isAgentClosingReply,
   isAgentFarewellMessage,
+  isAgentFillerPhrase,
   isInternalTranscriptMessage,
   isUserFarewellMessage,
 } from '../lib/conversation-end';
@@ -249,6 +251,18 @@ function verifyConversationEndHelpers() {
       'The user has been quiet for a while. Ask one brief, friendly question.',
     ),
     'isInternalTranscriptMessage should hide silence think prompts',
+  );
+  assert(
+    isAgentFillerPhrase('Let me think about that.'),
+    'isAgentFillerPhrase should detect filler',
+  );
+  assert(
+    !isAgentClosingReply('Let me think about that.'),
+    'filler should not count as closing reply',
+  );
+  assert(
+    isAgentClosingReply('Goodbye, take care!'),
+    'isAgentClosingReply should detect real goodbye',
   );
 }
 

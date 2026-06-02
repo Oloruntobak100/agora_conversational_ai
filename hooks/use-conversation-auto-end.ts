@@ -1,9 +1,11 @@
 import { useEffect, useRef } from "react";
 import {
   getFarewellHangupMs,
+  isAgentClosingReply,
   isInternalTranscriptMessage,
   isUserEndIntent,
 } from "@/lib/conversation-end";
+
 type MessageItem = {
   turn_id?: string | number;
   uid: number;
@@ -22,7 +24,7 @@ export function useConversationAutoEnd(options: {
   sessionEndHandled: React.MutableRefObject<boolean>;
 }): void {
   const userEndIndexRef = useRef(-1);
-  const shortenedAfterAgentReplyRef = useRef(false);
+  const shortenedAfterClosingRef = useRef(false);
   const hangupTimerRef = useRef<number | null>(null);
 
   const clearHangupTimer = () => {
@@ -34,7 +36,7 @@ export function useConversationAutoEnd(options: {
 
   useEffect(() => {
     userEndIndexRef.current = -1;
-    shortenedAfterAgentReplyRef.current = false;
+    shortenedAfterClosingRef.current = false;
     clearHangupTimer();
   }, [options.channel]);
 
@@ -62,11 +64,12 @@ export function useConversationAutoEnd(options: {
     if (lastUserEndIndex < 0) return;
 
     const afterGoodbye = visible.slice(lastUserEndIndex + 1);
-    const agentReplied = afterGoodbye.some(
-      (m) => String(m.uid) === agentUidStr,
+    const agentClosingReply = afterGoodbye.some(
+      (m) =>
+        String(m.uid) === agentUidStr && isAgentClosingReply(m.text ?? ""),
     );
 
-    const fireEnd = (reason: string, delayMs: number) => {
+    const fireEnd = (reason: string) => {
       if (options.sessionEndHandled.current) return;
       options.sessionEndHandled.current = true;
       clearHangupTimer();
@@ -77,21 +80,21 @@ export function useConversationAutoEnd(options: {
     const schedule = (reason: string, delayMs: number) => {
       clearHangupTimer();
       hangupTimerRef.current = window.setTimeout(
-        () => fireEnd(reason, delayMs),
+        () => fireEnd(reason),
         delayMs,
       );
     };
 
     if (userEndIndexRef.current !== lastUserEndIndex) {
       userEndIndexRef.current = lastUserEndIndex;
-      shortenedAfterAgentReplyRef.current = false;
+      shortenedAfterClosingRef.current = false;
       schedule("user-goodbye-max-wait", MAX_WAIT_AFTER_USER_GOODBYE_MS);
       return;
     }
 
-    if (agentReplied && !shortenedAfterAgentReplyRef.current) {
-      shortenedAfterAgentReplyRef.current = true;
-      schedule("agent-replied-after-goodbye", getFarewellHangupMs());
+    if (agentClosingReply && !shortenedAfterClosingRef.current) {
+      shortenedAfterClosingRef.current = true;
+      schedule("agent-closing-reply", getFarewellHangupMs());
     }
   }, [
     options.enabled,

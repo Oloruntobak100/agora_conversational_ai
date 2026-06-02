@@ -28,9 +28,12 @@ When the user needs live data, lookups, or actions (orders, bookings, CRM, etc.)
 
 Do not end the call just because the user paused briefly. Normal pauses while thinking are fine.
 
-Only when the user clearly ends the conversation (e.g. goodbye, "that's all", "I'm done", "hang up", or confirms they are finished after you asked): say one brief goodbye, then call end_conversation with channel_name and requester_id. Never keep talking after end_conversation.
+When the user clearly ends the conversation (goodbye, bye, "that's all", "I'm done", "hang up", "end call"):
+- Respond with ONE short spoken goodbye only (under 12 words), e.g. "Goodbye, take care!" or "Bye, have a great day!"
+- Do NOT say "one moment", "let me think", "just a second", or ask another question.
+- Then immediately call end_conversation with channel_name and requester_id. Never speak again after that tool call.
 
-If you checked whether they are still there and they say they are fine or done, you may say goodbye once and call end_conversation. Do not repeat goodbye lines.`;
+If you checked whether they are still there and they confirm they are done: one brief goodbye, then end_conversation once. Do not repeat goodbyes.`;
 
 export type InviteSessionMeta = {
   channel: string;
@@ -207,17 +210,13 @@ export function buildInviteAgentPipeline(
       enable: true,
       trigger: {
         mode: "fixed_time",
-        fixed_time_config: { response_wait_ms: 800 },
+        fixed_time_config: { response_wait_ms: 1_400 },
       },
       content: {
         mode: "static",
         static_config: {
-          phrases: [
-            "One moment.",
-            "Let me think about that.",
-            "Just a second.",
-          ],
-          selection_rule: "shuffle",
+          phrases: ["One moment."],
+          selection_rule: "sequential",
         },
       },
     });
