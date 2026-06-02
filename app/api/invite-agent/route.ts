@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { after } from "next/server";
 import { AgoraClient, Area, ExpiresIn } from "agora-agent-server-sdk";
 import type { AgentResponse, ClientStartRequest } from "@/types/conversation";
 import {
@@ -7,9 +6,12 @@ import {
   getAgentUid,
   getAgoraAppCertificate,
   getAgoraAppId,
+  getIdleTimeoutSec,
   getLlmApiKey,
 } from "@/lib/env";
 import { buildInviteAgentPipeline } from "@/lib/invite-agent-pipeline";
+import { scheduleAfterResponse } from "@/lib/schedule-after-response";
+import { setSessionToolContext } from "@/lib/session-tool-context";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 
 export async function POST(request: NextRequest) {
@@ -50,23 +52,27 @@ export async function POST(request: NextRequest) {
     });
 
     const agentName = `nexora-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-    const { agent, config } = buildInviteAgentPipeline(agentName);
+    const { agent, config } = buildInviteAgentPipeline(agentName, {
+      channel: channel_name,
+      requesterId: requester_id,
+    });
 
     const session = agent.createSession(client, {
       channel: channel_name,
       agentUid,
       remoteUids: [requester_id],
-      idleTimeout: 120,
+      idleTimeout: getIdleTimeoutSec(),
       expiresIn: ExpiresIn.hours(1),
       debug: false,
     });
 
     const agentId = await session.start();
+    setSessionToolContext(channel_name, agentId, requester_id);
 
     const { greeting } = config;
     if (greeting) {
       const delayMs = getAgentGreetingDelayMs();
-      after(async () => {
+      scheduleAfterResponse(async () => {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
         try {
           await session.say(greeting);
@@ -82,6 +88,7 @@ export async function POST(request: NextRequest) {
       agentUid,
       requester_id,
       byok: config.byok,
+      toolsEnabled: config.toolsEnabled,
       greetingDelayMs: greeting ? getAgentGreetingDelayMs() : 0,
     });
 

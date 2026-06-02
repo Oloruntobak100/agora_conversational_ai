@@ -1,0 +1,101 @@
+# Nexora n8n tool bridge
+
+Nexora can call **n8n Cloud** workflows while the Agora Conversational AI agent is in a live session. Workflows run through a shared JSON contract; results are spoken back by the agent or can end the session.
+
+## Architecture
+
+1. **Production:** Agora cloud → `https://<your-domain>/api/mcp` (Streamable HTTP MCP) → `invoke_workflow` / `end_conversation`.
+2. **Manual testing:** `POST /api/tools` with the same tool names and args (no MCP handshake).
+
+Both paths use `lib/agent-tools` (`executeAgentTool`, `dispatch-n8n.ts`).
+
+## Enable tools
+
+Set in Vercel (or `.env.local`):
+
+| Variable | Required | Notes |
+|----------|----------|--------|
+| `AGORA_ENABLE_TOOLS` | Yes | `true` to register MCP on the agent |
+| `NEXORA_MCP_PUBLIC_URL` | Yes* | Public HTTPS base, e.g. `https://nexora-voice-ai.vercel.app` |
+| `N8N_TOOL_WEBHOOK_URL` | Yes | Default n8n webhook for `invoke_workflow` |
+| `N8N_WEBHOOK_SECRET` | Recommended | Sent as `X-Webhook-Secret` to n8n |
+| `MCP_AUTH_TOKEN` | Recommended | Agora sends `Authorization: Bearer …` to `/api/mcp` |
+
+\*If unset, `VERCEL_URL` is used on Vercel deployments.
+
+Optional:
+
+- `N8N_TOOL_ROUTES_JSON` — per-tool URLs, e.g. `{"lookup_order":"https://…/webhook/abc"}`
+
+**Tools stay off** unless `AGORA_ENABLE_TOOLS=true` **and** a public MCP URL resolves. This avoids breaking sessions when MCP is misconfigured.
+
+## Reference n8n workflow
+
+1. **Webhook** trigger (POST), path e.g. `nexora-tools`.
+2. Your logic (HTTP Request, Set, Code, etc.).
+3. **Respond to Webhook** node with JSON:
+
+```json
+{
+  "speak": "Your order ships tomorrow.",
+  "endSession": false,
+  "data": { "orderId": "123" }
+}
+```
+
+| Field | Purpose |
+|-------|---------|
+| `speak` | Line for the agent to paraphrase to the user |
+| `endSession` | If `true`, Nexora stops the agent and sends RTM `nexora.session` end |
+| `data` | Opaque payload (logged / future UI) |
+
+### Incoming payload from Nexora
+
+```json
+{
+  "tool": "invoke_workflow",
+  "args": { "query": "order 123" },
+  "sessionId": "channel-name",
+  "channel": "channel-name",
+  "requesterId": "4321",
+  "agentId": "cloud-agent-id"
+}
+```
+
+Validate `X-Webhook-Secret` in n8n (IF node or Function) when `N8N_WEBHOOK_SECRET` is set.
+
+## MCP tools (Agora-facing)
+
+| Tool | Args | Behavior |
+|------|------|----------|
+| `invoke_workflow` | `channel_name`, `requester_id`, optional `workflow`, `args` | POST to n8n |
+| `end_conversation` | `channel_name`, `requester_id`, optional `reason` | Stop agent + RTM end signal |
+
+The system prompt instructs the LLM to pass `channel_name` and `requester_id` from template variables `{{channel_name}}` and `{{requester_id}}`.
+
+Session metadata is also stored in-memory after invite (`lib/session-tool-context.ts`) for warm serverless instances.
+
+## Test checklist
+
+1. **Env:** `AGORA_ENABLE_TOOLS=true`, `NEXORA_MCP_PUBLIC_URL`, `N8N_TOOL_WEBHOOK_URL`, `MCP_AUTH_TOKEN`.
+2. **Direct API:**
+
+```bash
+curl -s -X POST https://<domain>/api/tools \
+  -H "Content-Type: application/json" \
+  -d '{"tool":"invoke_workflow","args":{"channel_name":"test-ch","requester_id":"999","query":"ping"}}'
+```
+
+3. **Live call:** Start a session, ask the agent to run a workflow; confirm n8n execution history.
+4. **End session:** Say goodbye; agent should call `end_conversation` and the UI should tear down without refresh.
+
+## Troubleshooting
+
+| Issue | Check |
+|-------|--------|
+| Agent never calls tools | `AGORA_ENABLE_TOOLS`, public MCP URL, Agora can reach HTTPS (not localhost) |
+| MCP 401 | `MCP_AUTH_TOKEN` matches Console / OpenAI vendor MCP headers |
+| n8n 404 | Webhook URL and workflow **Active** |
+| Tool missing session | Pass `channel_name` + `requester_id` in tool args; re-invite after cold start |
+
+See also [WEBHOOKS.md](./WEBHOOKS.md) for Agora Console notifications (ops, not tool execution).

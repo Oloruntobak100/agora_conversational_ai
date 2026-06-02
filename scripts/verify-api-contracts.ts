@@ -1,6 +1,8 @@
+import { createHmac } from 'node:crypto';
 import { AgoraClient, Agent } from 'agora-agent-server-sdk';
 import { RtcTokenBuilder } from 'agora-token';
 import { NextRequest } from 'next/server';
+import { verifyAgoraWebhookRequest } from '../lib/webhooks/verify-agora-signature';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -105,6 +107,7 @@ async function verifyInviteAgentSuccess() {
     return {
       start: async () => 'mock-agent-id',
       say: async () => {},
+      update: async () => {},
     };
   }) as unknown as typeof Agent.prototype.createSession;
 
@@ -223,12 +226,165 @@ async function verifyStopConversationSuccess() {
   }
 }
 
+async function verifyAgoraWebhookSignature() {
+  const secret = 'test-webhook-secret';
+  const body = '{"eventType":101,"noticeId":"n1"}';
+  const sig = createHmac('sha256', secret).update(body, 'utf8').digest('hex');
+  const headers = new Headers({ 'Agora-Signature-V2': sig });
+
+  assert(
+    verifyAgoraWebhookRequest(body, secret, headers),
+    'verifyAgoraWebhookRequest should accept valid SHA256 signature',
+  );
+  assert(
+    !verifyAgoraWebhookRequest(body, 'wrong-secret', headers),
+    'verifyAgoraWebhookRequest should reject invalid secret',
+  );
+}
+
+async function verifyWebhooksAgoraRoute() {
+  const { POST: agoraWebhook } =
+    await import('../app/api/webhooks/agora/route');
+  const body = JSON.stringify({ eventType: 101, noticeId: 'contract-test' });
+  const secret = 'contract-webhook-secret';
+  process.env.AGORA_WEBHOOK_SECRET = secret;
+  const sig = createHmac('sha256', secret).update(body, 'utf8').digest('hex');
+
+  try {
+    const request = new Request('http://localhost:3000/api/webhooks/agora', {
+      body,
+      headers: {
+        'Agora-Signature-V2': sig,
+        'Content-Type': 'application/json',
+      },
+      method: 'POST',
+    });
+    const response = await agoraWebhook(request);
+    const json = await getJson(response);
+
+    assert(
+      response.status === 200,
+      'POST /api/webhooks/agora should return 200 for valid signature',
+    );
+    assert(
+      json.ok === true,
+      'POST /api/webhooks/agora should return ok: true',
+    );
+  } finally {
+    delete process.env.AGORA_WEBHOOK_SECRET;
+  }
+}
+
+async function verifyToolsRouteSuccess() {
+  process.env.N8N_TOOL_WEBHOOK_URL = 'https://n8n.example/webhook/test';
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ speak: 'Workflow ok' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+  try {
+    const { POST: toolsRoute } = await import('../app/api/tools/route');
+    const request = new NextRequest('http://localhost:3000/api/tools', {
+      body: JSON.stringify({
+        tool: 'invoke_workflow',
+        args: {
+          channel_name: 'tool-channel',
+          requester_id: 'user-99',
+          query: 'ping',
+        },
+      }),
+      method: 'POST',
+    });
+    const response = await toolsRoute(request);
+    const json = await getJson(response);
+
+    assert(
+      response.status === 200,
+      'POST /api/tools should return 200 when n8n responds',
+    );
+    assert(json.ok === true, 'POST /api/tools should return ok: true');
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.N8N_TOOL_WEBHOOK_URL;
+  }
+}
+
+async function verifyInvitePipelineToolsGating() {
+  const savedEnable = process.env.AGORA_ENABLE_TOOLS;
+  const savedMcpUrl = process.env.NEXORA_MCP_PUBLIC_URL;
+  const savedVercel = process.env.VERCEL_URL;
+
+  delete process.env.AGORA_ENABLE_TOOLS;
+  delete process.env.NEXORA_MCP_PUBLIC_URL;
+  delete process.env.VERCEL_URL;
+
+  const { buildInviteAgentPipeline } =
+    await import('../lib/invite-agent-pipeline');
+
+  const disabled = buildInviteAgentPipeline('contract', {
+    channel: 'ch-off',
+    requesterId: 'u1',
+  });
+  assert(
+    disabled.config.toolsEnabled === false,
+    'tools should be disabled without AGORA_ENABLE_TOOLS',
+  );
+
+  process.env.AGORA_ENABLE_TOOLS = 'true';
+  process.env.NEXORA_MCP_PUBLIC_URL = 'https://nexora.example.com';
+
+  const enabled = buildInviteAgentPipeline('contract', {
+    channel: 'ch-on',
+    requesterId: 'u1',
+  });
+  assert(
+    enabled.config.toolsEnabled === true,
+    'tools should be enabled with AGORA_ENABLE_TOOLS and public MCP URL',
+  );
+
+  if (savedEnable === undefined) delete process.env.AGORA_ENABLE_TOOLS;
+  else process.env.AGORA_ENABLE_TOOLS = savedEnable;
+  if (savedMcpUrl === undefined) delete process.env.NEXORA_MCP_PUBLIC_URL;
+  else process.env.NEXORA_MCP_PUBLIC_URL = savedMcpUrl;
+  if (savedVercel === undefined) delete process.env.VERCEL_URL;
+  else process.env.VERCEL_URL = savedVercel;
+}
+
+async function verifyMcpAuthRejection() {
+  const savedToken = process.env.MCP_AUTH_TOKEN;
+  process.env.MCP_AUTH_TOKEN = 'contract-mcp-token';
+
+  try {
+    const { handleMcpRequest } = await import('../lib/mcp/handle-mcp-request');
+    const request = new Request('http://localhost:3000/api/mcp', {
+      method: 'POST',
+    });
+    const response = await handleMcpRequest(request);
+
+    assert(
+      response.status === 401,
+      'POST /api/mcp should reject missing Bearer when MCP_AUTH_TOKEN is set',
+    );
+  } finally {
+    if (savedToken === undefined) delete process.env.MCP_AUTH_TOKEN;
+    else process.env.MCP_AUTH_TOKEN = savedToken;
+  }
+}
+
 async function main() {
   await verifyGenerateAgoraTokenRoute();
   await verifyInviteAgentValidation();
   await verifyInviteAgentSuccess();
   await verifyStopConversationValidation();
   await verifyStopConversationSuccess();
+  await verifyAgoraWebhookSignature();
+  await verifyWebhooksAgoraRoute();
+  await verifyToolsRouteSuccess();
+  await verifyInvitePipelineToolsGating();
+  await verifyMcpAuthRejection();
 
   console.log('API contract checks passed');
 }

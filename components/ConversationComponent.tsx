@@ -53,6 +53,7 @@ import { getAgentConnectionPhase } from '@/lib/agent-connection-phase';
 import { isMobileBrowser } from '@/lib/device';
 import { createCloudAgentInviteRunner } from '@/lib/run-cloud-agent-invite';
 import { getRtcJoinReadyDelayMs } from '@/lib/session-bootstrap';
+import { isNexoraSessionPayload } from '@/lib/nexora-session';
 import type { ConversationComponentProps } from '@/types/conversation';
 
 
@@ -275,6 +276,7 @@ export default function ConversationComponent({
   const inviteStartedForChannel = useRef<string | null>(null);
   const agentWatchdogFired = useRef(false);
   const toolkitSubscribed = useRef(false);
+  const sessionEndHandled = useRef(false);
 
   // Retry RTM in-call when bootstrap failed (common on mobile / incognito).
   useEffect(() => {
@@ -333,6 +335,7 @@ export default function ConversationComponent({
     inviteStartedForChannel.current = null;
     agentWatchdogFired.current = false;
     toolkitSubscribed.current = false;
+    sessionEndHandled.current = false;
     rtmReconnectAttempts.current = 0;
     rtcJoinRetries.current = 0;
   }, [agoraData.channel]);
@@ -598,6 +601,14 @@ export default function ConversationComponent({
         return;
       }
 
+      if (isNexoraSessionPayload(parsed)) {
+        if (!sessionEndHandled.current) {
+          sessionEndHandled.current = true;
+          window.setTimeout(() => onEndConversation(), 400);
+        }
+        return;
+      }
+
       if (isRtmMessageErrorPayload(parsed)) {
         const p = parsed;
         addConnectionIssue({
@@ -633,7 +644,7 @@ export default function ConversationComponent({
     return () => {
       activeRtm.removeEventListener('message', handleRtmMessage);
     };
-  }, [activeRtm, addConnectionIssue]);
+  }, [activeRtm, addConnectionIssue, onEndConversation]);
 
   // The toolkit uses uid="0" for local user speech — remap to actual RTC UID
   // so the transcript panel renders user messages on the correct side.

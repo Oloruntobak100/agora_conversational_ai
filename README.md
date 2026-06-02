@@ -50,8 +50,16 @@ Set in **Production** and **Preview**:
 | `NEXT_DEEPGRAM_API_KEY` | No | BYOK STT if needed |
 | `NEXT_MINIMAX_API_KEY` | No | BYOK TTS if needed |
 | `NEXT_MINIMAX_GROUP_ID` | No | Required with MiniMax key |
+| `AGORA_ENABLE_TOOLS` | No | `true` to wire MCP tools on the cloud agent |
+| `NEXORA_MCP_PUBLIC_URL` | When tools on | Public HTTPS base (Agora calls `{url}/api/mcp`) |
+| `MCP_AUTH_TOKEN` | Recommended | Bearer auth for `/api/mcp` |
+| `N8N_TOOL_WEBHOOK_URL` | When tools on | Default n8n webhook for `invoke_workflow` |
+| `N8N_WEBHOOK_SECRET` | Recommended | `X-Webhook-Secret` to n8n |
+| `AGORA_WEBHOOK_SECRET` | Recommended | Verify Agora Console notification signatures |
 
 **Legacy fallbacks** (optional): `AGORA_APP_ID`, `AGORA_APP_CERTIFICATE`, `OPENAI_API_KEY` (same as `NEXT_LLM_API_KEY`).
+
+See [DOCS/N8N_TOOLS.md](./DOCS/N8N_TOOLS.md) and [DOCS/WEBHOOKS.md](./DOCS/WEBHOOKS.md) for tool and webhook setup.
 
 **Remove** (no longer used): `AGORA_CUSTOMER_ID`, `AGORA_CUSTOMER_SECRET`, `AGORA_AGENT_PRESET`, `AGENT_LLM_MODEL`.
 
@@ -84,7 +92,9 @@ sequenceDiagram
 | `/api/generate-agora-token` | GET | RTC + RTM token |
 | `/api/invite-agent` | POST | Start Conversational AI agent |
 | `/api/stop-conversation` | POST | Stop agent |
-| `/api/tools` | POST | Optional n8n webhook stub |
+| `/api/tools` | POST | Manual n8n tool bridge (testing) |
+| `/api/mcp` | GET/POST/DELETE | Streamable HTTP MCP for Agora cloud tools |
+| `/api/webhooks/agora` | POST | Agora Console session notifications |
 
 ## Commands
 
