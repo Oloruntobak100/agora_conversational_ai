@@ -2,8 +2,9 @@ import { useEffect, useRef } from "react";
 import {
   getFarewellHangupMs,
   isInternalTranscriptMessage,
-  isUserFarewellMessage,
+  isUserEndIntent,
 } from "@/lib/conversation-end";
+import { debugSessionLog } from "@/lib/debug-session-log";
 
 type MessageItem = {
   turn_id?: string | number;
@@ -12,26 +13,36 @@ type MessageItem = {
   createdAt?: number;
 };
 
-function isUserEndIntent(text: string): boolean {
-  const t = text.trim();
-  return (
-    isUserFarewellMessage(t) || /end conversation/i.test(t) || /^bye\.?$/i.test(t)
-  );
-}
+const MAX_WAIT_AFTER_USER_GOODBYE_MS = 8_000;
 
 export function useConversationAutoEnd(options: {
   enabled: boolean;
   channel: string;
   messageList: MessageItem[];
   agentUid: string;
-  onEnd: () => void;
+  onEnd: () => void | Promise<void>;
   sessionEndHandled: React.MutableRefObject<boolean>;
 }): void {
-  const scheduledKey = useRef<string | null>(null);
+  const userEndIndexRef = useRef(-1);
+  const shortenedAfterAgentReplyRef = useRef(false);
+  const hangupTimerRef = useRef<number | null>(null);
+
+  const clearHangupTimer = () => {
+    if (hangupTimerRef.current !== null) {
+      window.clearTimeout(hangupTimerRef.current);
+      hangupTimerRef.current = null;
+    }
+  };
 
   useEffect(() => {
-    scheduledKey.current = null;
+    userEndIndexRef.current = -1;
+    shortenedAfterAgentReplyRef.current = false;
+    clearHangupTimer();
   }, [options.channel]);
+
+  useEffect(() => {
+    return () => clearHangupTimer();
+  }, []);
 
   useEffect(() => {
     if (!options.enabled || options.sessionEndHandled.current) return;
@@ -49,6 +60,7 @@ export function useConversationAutoEnd(options: {
         break;
       }
     }
+
     if (lastUserEndIndex < 0) return;
 
     const afterGoodbye = visible.slice(lastUserEndIndex + 1);
@@ -56,23 +68,46 @@ export function useConversationAutoEnd(options: {
       (m) => String(m.uid) === agentUidStr,
     );
 
-    const scheduleKey = `${lastUserEndIndex}-${afterGoodbye.length}`;
-    if (scheduledKey.current === scheduleKey) return;
-    scheduledKey.current = scheduleKey;
-
-    const delayMs = agentReplied ? getFarewellHangupMs() : 5_000;
-
-    const id = window.setTimeout(() => {
+    const fireEnd = (reason: string, delayMs: number) => {
       if (options.sessionEndHandled.current) return;
       options.sessionEndHandled.current = true;
-      console.info("[auto-end] user ended call, closing session", {
-        agentReplied,
+      clearHangupTimer();
+      debugSessionLog("H3", "use-conversation-auto-end.ts:fire", "hangup fired", {
+        reason,
         delayMs,
+        lastUserEndIndex,
+        agentReplied,
       });
-      options.onEnd();
-    }, delayMs);
+      console.info("[auto-end]", reason);
+      void Promise.resolve(options.onEnd());
+    };
 
-    return () => window.clearTimeout(id);
+    const schedule = (reason: string, delayMs: number) => {
+      clearHangupTimer();
+      debugSessionLog("H1", "use-conversation-auto-end.ts:schedule", "hangup scheduled", {
+        reason,
+        delayMs,
+        lastUserEndIndex,
+        agentReplied,
+        previousUserEndIndex: userEndIndexRef.current,
+      });
+      hangupTimerRef.current = window.setTimeout(
+        () => fireEnd(reason, delayMs),
+        delayMs,
+      );
+    };
+
+    if (userEndIndexRef.current !== lastUserEndIndex) {
+      userEndIndexRef.current = lastUserEndIndex;
+      shortenedAfterAgentReplyRef.current = false;
+      schedule("user-goodbye-max-wait", MAX_WAIT_AFTER_USER_GOODBYE_MS);
+      return;
+    }
+
+    if (agentReplied && !shortenedAfterAgentReplyRef.current) {
+      shortenedAfterAgentReplyRef.current = true;
+      schedule("agent-replied-after-goodbye", getFarewellHangupMs());
+    }
   }, [
     options.enabled,
     options.channel,

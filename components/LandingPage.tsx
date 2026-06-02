@@ -19,6 +19,7 @@ import {
 } from '@/lib/session-agent-storage';
 import type { RtmConnectionState } from '@/types/conversation';
 import { publishNexoraSessionEndFromClient } from '@/lib/publish-nexora-session-end-client';
+import { debugSessionLog } from '@/lib/debug-session-log';
 import { QuickstartPreCallCard } from './QuickstartPreCallCard';
 
 // Dynamically import the ConversationComponent with ssr disabled
@@ -198,6 +199,13 @@ export default function LandingPage() {
   const handleEndConversation = async () => {
     const snapshot = agoraData;
     const rtm = rtmClient;
+    // #region agent log
+    debugSessionLog('H4', 'LandingPage.tsx:handleEndConversation', 'parent end handler start', {
+      hasSnapshot: Boolean(snapshot),
+      hasAgentId: Boolean(snapshot?.agentId),
+      showConversation,
+    });
+    // #endregion
 
     try {
       if (snapshot?.agentId && snapshot.channel && snapshot.uid) {
@@ -241,6 +249,9 @@ export default function LandingPage() {
       setRtmConnectionState('connecting');
       setAgoraData(null);
       setShowConversation(false);
+      // #region agent log
+      debugSessionLog('H4', 'LandingPage.tsx:handleEndConversation', 'UI closed showConversation=false', {});
+      // #endregion
     }
   };
 

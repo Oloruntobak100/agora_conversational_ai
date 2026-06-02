@@ -56,8 +56,21 @@ export function hasRecentUserEndIntent(
 export function isUserFarewellMessage(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
-  return /goodbye|good bye|that's all|that is all|i'm done|im done|hang up|end (the )?call|end conversation|bye\b|i'?m good/i.test(
+  return /goodbye|good bye|that's all|that is all|i'm done|im done|hang up|end (the )?call|end conversation|end call|bye\b|see you|talk later|take care|have a (good|great|nice) (day|night)|i'?m good|nothing else|no thanks|all set|we're done|we are done/i.test(
     t,
+  );
+}
+
+/** User clearly wants to end the call (voice transcript). */
+export function isUserEndIntent(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (isInternalTranscriptMessage(t)) return false;
+  return (
+    isUserFarewellMessage(t) ||
+    /end conversation/i.test(t) ||
+    /^bye\.?$/i.test(t) ||
+    /^thanks?,?\s*(bye|goodbye)\.?$/i.test(t)
   );
 }
 
