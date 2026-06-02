@@ -98,7 +98,7 @@ pnpm run verify   # doctor + lint + typecheck + API contracts + build
 
 | Issue | Action |
 |-------|--------|
-| **LLM 401 / error 505** in Connection Details | Set `NEXT_LLM_API_KEY` in Vercel (OpenAI key), redeploy |
+| **LLM 401 / error 505** (intermittent) | Agora reseller key in Console **or** `NEXT_LLM_API_KEY` in Vercel; refresh often left orphan agents — fixed by deferred invite + session cleanup |
 | Agent silent, mic works | Run `agora project doctor --deep`; check Analytics agent **Sender** / your **Receiver** |
 | RTM login fails | Token route must use `buildTokenWithRtm` (already in this repo) |
 | Agent never joins | `NEXT_PUBLIC_AGENT_UID` must match `getAgentUid()` / invite route |

@@ -30,6 +30,7 @@ import {
 } from '@/lib/audio-playback';
 import { debugSessionLog } from '@/lib/debug-session-log';
 import { ensureMicrophoneAccess } from '@/lib/microphone-permission';
+import { inviteCloudAgent } from '@/lib/invite-cloud-agent';
 import { setupRtmClient } from '@/lib/setup-rtm-client';
 import type { RtmConnectionState } from '@/types/conversation';
 import {
@@ -104,6 +105,8 @@ export default function ConversationComponent({
   rtmConnectionState,
   onTokenWillExpire,
   onEndConversation,
+  onAgentStarted,
+  onAgentInviteFailed,
 }: ConversationComponentProps) {
   const client = useRTCClient();
   const remoteUsers = useRemoteUsers();
@@ -255,6 +258,8 @@ export default function ConversationComponent({
 
   const rtmReconnectAttempts = useRef(0);
   const agentAudioPlayAttempted = useRef(false);
+  const agentInviteStarted = useRef(false);
+  const toolkitSubscribed = useRef(false);
   const transcriptLogged = useRef(false);
 
   // Retry RTM in-call when bootstrap failed (common on mobile / incognito).
@@ -324,6 +329,8 @@ export default function ConversationComponent({
     setSpeakerBlocked(false);
     setConnectionIssues([]);
     agentAudioPlayAttempted.current = false;
+    agentInviteStarted.current = false;
+    toolkitSubscribed.current = false;
     rtmReconnectAttempts.current = 0;
     transcriptLogged.current = false;
   }, [agoraData.channel]);
@@ -343,13 +350,23 @@ export default function ConversationComponent({
   }, [remoteUsers, agentUID]);
 
   useEffect(() => {
-    if (!joinSuccess || !isAgentConnected || agentAudioPlayAttempted.current) return;
+    if (!joinSuccess || !isAgentConnected) return;
     const agent = remoteUsers.find((u) => u.uid.toString() === agentUID);
     if (!agent?.audioTrack) return;
 
-    agentAudioPlayAttempted.current = true;
     void unlockAgentSpeaker();
   }, [joinSuccess, isAgentConnected, remoteUsers, agentUID, unlockAgentSpeaker]);
+
+  // Browsers (especially mobile) often block the first play(); retry until audio unlocks.
+  useEffect(() => {
+    if (!joinSuccess || !isAgentConnected || !speakerBlocked) return;
+
+    const intervalId = window.setInterval(() => {
+      void unlockAgentSpeaker();
+    }, 2500);
+
+    return () => window.clearInterval(intervalId);
+  }, [joinSuccess, isAgentConnected, speakerBlocked, unlockAgentSpeaker]);
 
   // Track the auto-assigned RTC UID for token renewal and agent invite.
   useEffect(() => {
@@ -456,6 +473,7 @@ export default function ConversationComponent({
           });
         });
         ai.subscribeMessage(agoraData.channel);
+        toolkitSubscribed.current = true;
 
         // #region agent log
         debugSessionLog({
@@ -465,6 +483,33 @@ export default function ConversationComponent({
           data: { channel: agoraData.channel, hasActiveRtm: !!activeRtm },
         });
         // #endregion
+
+        if (!agoraData.agentId && !agentInviteStarted.current) {
+          agentInviteStarted.current = true;
+          const agentResponse = await inviteCloudAgent(
+            agoraData.uid,
+            agoraData.channel,
+          );
+          if (cancelled) return;
+
+          if (agentResponse?.agent_id) {
+            // #region agent log
+            debugSessionLog({
+              location: 'ConversationComponent.tsx:deferredInvite',
+              message: 'Cloud agent invited after client ready',
+              hypothesisId: 'G',
+              data: {
+                agentId: agentResponse.agent_id,
+                joinSuccess: true,
+              },
+            });
+            // #endregion
+            onAgentStarted(agentResponse.agent_id);
+          } else {
+            agentInviteStarted.current = false;
+            onAgentInviteFailed?.();
+          }
+        }
       } catch (error) {
         if (!cancelled) {
           // #region agent log
@@ -493,7 +538,18 @@ export default function ConversationComponent({
       } catch {}
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isReady, joinSuccess, activeRtm, agoraData.channel, client, addConnectionIssue]);
+  }, [
+    isReady,
+    joinSuccess,
+    activeRtm,
+    agoraData.channel,
+    agoraData.uid,
+    agoraData.agentId,
+    client,
+    addConnectionIssue,
+    onAgentStarted,
+    onAgentInviteFailed,
+  ]);
 
   // Raw RTM parsing is kept as a fallback for signaling-level errors and SAL status.
   useEffect(() => {
@@ -573,18 +629,29 @@ export default function ConversationComponent({
   usePublish([activeMicTrack]);
 
   useClientEvent(client, 'user-joined', (user) => {
-    if (user.uid.toString() === agentUID) {
-      setIsAgentConnected(true);
-      // #region agent log
-      debugSessionLog({
-        location: 'ConversationComponent.tsx:user-joined',
-        message: 'Agent joined RTC channel',
-        hypothesisId: 'D',
-        data: { agentUID },
-      });
-      // #endregion
-      void unlockAgentSpeaker();
+    if (user.uid.toString() !== agentUID) return;
+
+    setIsAgentConnected(true);
+    agentAudioPlayAttempted.current = false;
+
+    try {
+      const ai = AgoraVoiceAI.getInstance();
+      if (ai && toolkitSubscribed.current) {
+        ai.subscribeMessage(agoraData.channel);
+      }
+    } catch {
+      // Toolkit may not be initialized yet on very fast agent join.
     }
+
+    // #region agent log
+    debugSessionLog({
+      location: 'ConversationComponent.tsx:user-joined',
+      message: 'Agent joined RTC channel',
+      hypothesisId: 'D',
+      data: { agentUID },
+    });
+    // #endregion
+    void unlockAgentSpeaker();
   });
 
   useClientEvent(client, 'user-left', (user) => {
@@ -740,6 +807,9 @@ export default function ConversationComponent({
   const showSpeakerPrompt =
     joinSuccess && isAgentConnected && speakerBlocked;
 
+  const isStartingAgent =
+    joinSuccess && !agoraData.agentId && !isAgentConnected;
+
   return (
     <QuickstartConversationLayout
       rtmState={rtmState}
@@ -793,6 +863,11 @@ export default function ConversationComponent({
           {rtmState === 'connecting' && (
             <p className="px-4 text-center text-xs text-muted-foreground">
               Connecting live transcript…
+            </p>
+          )}
+          {isStartingAgent && (
+            <p className="px-4 text-center text-xs text-muted-foreground">
+              Starting voice agent…
             </p>
           )}
           {showSpeakerPrompt && (

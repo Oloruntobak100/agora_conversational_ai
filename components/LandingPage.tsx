@@ -4,18 +4,19 @@ import { useState, useRef, Suspense, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import type { RTMClient } from 'agora-rtm';
-import type {
-  AgoraTokenData,
-  ClientStartRequest,
-  AgentResponse,
-  AgoraRenewalTokens,
-} from '../types/conversation';
+import type { AgoraTokenData, AgoraRenewalTokens } from '../types/conversation';
 import { ErrorBoundary } from './ErrorBoundary';
 import { LoadingSkeleton } from './LoadingSkeleton';
 import { resumeRtcAudioContext } from '@/lib/audio-playback';
 import { bootstrapRtmClient } from '@/lib/bootstrap-rtm-client';
 import { debugSessionLog } from '@/lib/debug-session-log';
 import { ensureMicrophoneAccess } from '@/lib/microphone-permission';
+import {
+  clearStoredAgentId,
+  getStoredAgentId,
+  setStoredAgentId,
+  stopStoredAgentIfAny,
+} from '@/lib/session-agent-storage';
 import type { RtmConnectionState } from '@/types/conversation';
 import { QuickstartPreCallCard } from './QuickstartPreCallCard';
 
@@ -61,6 +62,19 @@ export default function LandingPage() {
   useEffect(() => {
     import('agora-rtc-react').catch(() => {});
     import('agora-rtm').catch(() => {});
+
+    const onPageHide = () => {
+      const agentId = getStoredAgentId();
+      if (!agentId) return;
+      const body = JSON.stringify({ agent_id: agentId });
+      navigator.sendBeacon(
+        '/api/stop-conversation',
+        new Blob([body], { type: 'application/json' }),
+      );
+      clearStoredAgentId();
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => window.removeEventListener('pagehide', onPageHide);
   }, []);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,6 +97,7 @@ export default function LandingPage() {
     }
 
     await resumeRtcAudioContext();
+    await stopStoredAgentIfAny();
 
     try {
       const agoraResponse = await fetch('/api/generate-agora-token');
@@ -97,52 +112,28 @@ export default function LandingPage() {
       setRtmConnectionState('connecting');
       const appId = process.env.NEXT_PUBLIC_AGORA_APP_ID!;
 
-      const [agentData, rtm] = await Promise.all([
-        fetch('/api/invite-agent', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            requester_id: responseData.uid,
-            channel_name: responseData.channel,
-          } as ClientStartRequest),
-        })
-          .then(async (res) => {
-            if (!res.ok) {
-              setAgentJoinError(true);
-              return null;
-            }
-            return res.json() as Promise<AgentResponse>;
-          })
-          .catch((err) => {
-            console.error('Failed to start conversation with agent:', err);
-            setAgentJoinError(true);
-            return null;
-          }),
-
-        bootstrapRtmClient({
-          appId,
-          uid: responseData.uid,
-          token: responseData.token,
-          channel: responseData.channel,
-        }),
-      ]);
+      // RTC token + RTM first; cloud agent is invited only after the browser has
+      // joined the channel and AgoraVoiceAI is subscribed (avoids missing greeting
+      // / transcript on slower clients — same Vercel build as desktop).
+      const rtm = await bootstrapRtmClient({
+        appId,
+        uid: responseData.uid,
+        token: responseData.token,
+        channel: responseData.channel,
+      });
 
       // #region agent log
       debugSessionLog({
         location: 'LandingPage.tsx:bootstrap',
-        message: 'Session bootstrap complete',
-        hypothesisId: 'A',
-        data: {
-          hasRtm: true,
-          agentInviteOk: agentData !== null,
-          channel: responseData.channel,
-        },
+        message: 'Token and RTM ready; deferred cloud agent invite',
+        hypothesisId: 'G',
+        data: { hasRtm: true, channel: responseData.channel },
       });
       // #endregion
 
       setRtmConnectionState('ready');
       setRtmClient(rtm);
-      setAgoraData({ ...responseData, agentId: agentData?.agent_id });
+      setAgoraData({ ...responseData });
       setShowConversation(true);
     } catch (err) {
       // #region agent log
@@ -223,11 +214,22 @@ export default function LandingPage() {
       }
     }
 
+    clearStoredAgentId();
     setRtmClient(null);
     setRtmConnectionState('connecting');
     setAgoraData(null);
     setShowConversation(false);
   };
+
+  const handleAgentStarted = useCallback((agentId: string) => {
+    setStoredAgentId(agentId);
+    setAgentJoinError(false);
+    setAgoraData((prev) => (prev ? { ...prev, agentId } : prev));
+  }, []);
+
+  const handleAgentInviteFailed = useCallback(() => {
+    setAgentJoinError(true);
+  }, []);
 
   return (
     <div className="relative flex h-dvh min-h-screen flex-col overflow-hidden bg-background text-foreground">
@@ -269,6 +271,8 @@ export default function LandingPage() {
                       rtmConnectionState={rtmConnectionState}
                       onTokenWillExpire={handleTokenWillExpire}
                       onEndConversation={handleEndConversation}
+                      onAgentStarted={handleAgentStarted}
+                      onAgentInviteFailed={handleAgentInviteFailed}
                     />
                   </AgoraProvider>
                 </ErrorBoundary>

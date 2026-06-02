@@ -36,4 +36,7 @@ export interface ConversationComponentProps {
   rtmConnectionState: RtmConnectionState;
   onTokenWillExpire: (uid: string) => Promise<AgoraRenewalTokens>;
   onEndConversation: () => void;
+  /** Called after RTC+RTM are ready and the cloud agent has been invited. */
+  onAgentStarted: (agentId: string) => void;
+  onAgentInviteFailed?: () => void;
 }
