@@ -1,93 +1,90 @@
 import { useEffect, useRef } from "react";
-import type { AgentState } from "agora-agent-client-toolkit";
 import {
   getFarewellHangupMs,
-  getSilenceForceEndMs,
   isAgentFarewellMessage,
+  isInternalTranscriptMessage,
+  isUserFarewellMessage,
 } from "@/lib/conversation-end";
 
 type MessageItem = {
+  turn_id?: string | number;
   uid: number;
   text: string;
   createdAt?: number;
 };
+
+function turnKey(msg: MessageItem): string {
+  return `${msg.turn_id ?? ""}:${msg.uid}:${msg.text}`;
+}
+
+function hasRecentUserEndIntent(
+  visible: MessageItem[],
+  agentUidStr: string,
+): boolean {
+  const start = Math.max(0, visible.length - 6);
+  for (let i = visible.length - 2; i >= start; i--) {
+    const m = visible[i];
+    if (String(m.uid) === agentUidStr) continue;
+    const t = m.text.trim();
+    if (
+      isUserFarewellMessage(t) ||
+      /^i'?m good\.?$/i.test(t) ||
+      /^that'?s all\.?$/i.test(t)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export function useConversationAutoEnd(options: {
   enabled: boolean;
   channel: string;
   messageList: MessageItem[];
   agentUid: string;
-  agentState: AgentState | null;
   onEnd: () => void;
   sessionEndHandled: React.MutableRefObject<boolean>;
 }): void {
-  const lastUserSpeechAt = useRef(Date.now());
-  const callStartedAt = useRef(Date.now());
+  const scheduledFarewellKey = useRef<string | null>(null);
 
   useEffect(() => {
-    lastUserSpeechAt.current = Date.now();
-    callStartedAt.current = Date.now();
+    scheduledFarewellKey.current = null;
   }, [options.channel]);
 
   useEffect(() => {
+    if (!options.enabled || options.sessionEndHandled.current) return;
+
+    const visible = options.messageList.filter(
+      (m) => !isInternalTranscriptMessage(m.text ?? ""),
+    );
+    if (visible.length === 0) return;
+
+    const last = visible[visible.length - 1];
     const agentUidStr = options.agentUid;
-    let latest = lastUserSpeechAt.current;
-    for (const msg of options.messageList) {
-      if (String(msg.uid) !== agentUidStr) {
-        const t = msg.createdAt ?? Date.now();
-        if (t > latest) latest = t;
-      }
-    }
-    lastUserSpeechAt.current = latest;
-  }, [options.messageList, options.agentUid]);
 
-  useEffect(() => {
-    if (!options.enabled) return;
+    if (String(last.uid) !== agentUidStr) return;
+    if (!isAgentFarewellMessage(last.text)) return;
 
-    const farewellMs = getFarewellHangupMs();
-    const forceMs = getSilenceForceEndMs();
+    if (!hasRecentUserEndIntent(visible, agentUidStr)) return;
 
-    const tick = () => {
+    const key = turnKey(last);
+    if (scheduledFarewellKey.current === key) return;
+    scheduledFarewellKey.current = key;
+
+    const delayMs = getFarewellHangupMs();
+    const id = window.setTimeout(() => {
       if (options.sessionEndHandled.current) return;
+      options.sessionEndHandled.current = true;
+      console.info("[auto-end] farewell exchange complete, ending session");
+      options.onEnd();
+    }, delayMs);
 
-      const agentBusy =
-        options.agentState === "speaking" ||
-        options.agentState === "thinking";
-
-      const now = Date.now();
-      const sinceUser = now - lastUserSpeechAt.current;
-
-      const last = options.messageList[options.messageList.length - 1];
-      if (
-        last &&
-        String(last.uid) === options.agentUid &&
-        isAgentFarewellMessage(last.text) &&
-        !agentBusy &&
-        sinceUser >= farewellMs
-      ) {
-        options.sessionEndHandled.current = true;
-        console.info("[auto-end] agent farewell detected, ending session");
-        options.onEnd();
-        return;
-      }
-
-      if (now - callStartedAt.current < 10_000) return;
-
-      if (!agentBusy && sinceUser >= forceMs) {
-        options.sessionEndHandled.current = true;
-        console.info("[auto-end] silence force-end timeout");
-        options.onEnd();
-      }
-    };
-
-    const id = window.setInterval(tick, 500);
-    return () => window.clearInterval(id);
+    return () => window.clearTimeout(id);
   }, [
     options.enabled,
     options.channel,
     options.messageList,
     options.agentUid,
-    options.agentState,
     options.onEnd,
     options.sessionEndHandled,
   ]);

@@ -5,6 +5,7 @@ import {
   type TranscriptHelperItem,
   type UserTranscription,
 } from 'agora-agent-client-toolkit';
+import { isInternalTranscriptMessage } from '@/lib/conversation-end';
 import {
   type AgentVisualizerState,
   type IMessageListItem,
@@ -114,6 +115,15 @@ export function getMessageList(
   return transcript
     .filter((item) => item.status !== TurnStatus.IN_PROGRESS)
     .map(toMessageListItem);
+}
+
+/** Transcript history for UI — hides Agora silence / system think prompts. */
+export function getVisibleMessageList(
+  transcript: TranscriptHelperItem<Partial<UserTranscription | AgentTranscription>>[],
+) {
+  return getMessageList(transcript).filter(
+    (item) => !isInternalTranscriptMessage(item.text),
+  );
 }
 
 // Returns the single active in-progress turn, or null when none exists.

@@ -26,9 +26,11 @@ Session context: channel {{channel_name}}, user id {{requester_id}}.
 
 When the user needs live data, lookups, or actions (orders, bookings, CRM, etc.), call the invoke_workflow tool with channel_name, requester_id, and a clear description in args.
 
-When the user says goodbye, says they are done, or the task is complete: say one brief goodbye line, then immediately call end_conversation with channel_name and requester_id. Never keep talking after end_conversation.
+Do not end the call just because the user paused briefly. Normal pauses while thinking are fine.
 
-After a silence wrap-up where the user confirms they are done (e.g. "I'm good", "that's all"): say a brief goodbye and call end_conversation immediately.`;
+Only when the user clearly ends the conversation (e.g. goodbye, "that's all", "I'm done", "hang up", or confirms they are finished after you asked): say one brief goodbye, then call end_conversation with channel_name and requester_id. Never keep talking after end_conversation.
+
+If you checked whether they are still there and they say they are fine or done, you may say goodbye once and call end_conversation. Do not repeat goodbye lines.`;
 
 export type InviteSessionMeta = {
   channel: string;

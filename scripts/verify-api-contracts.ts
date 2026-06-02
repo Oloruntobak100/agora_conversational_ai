@@ -4,6 +4,7 @@ import { RtcTokenBuilder } from 'agora-token';
 import { NextRequest } from 'next/server';
 import {
   isAgentFarewellMessage,
+  isInternalTranscriptMessage,
   isUserFarewellMessage,
 } from '../lib/conversation-end';
 import { verifyAgoraWebhookRequest } from '../lib/webhooks/verify-agora-signature';
@@ -243,6 +244,12 @@ function verifyConversationEndHelpers() {
     isUserFarewellMessage("Goodbye. That's all."),
     'isUserFarewellMessage should detect user goodbye',
   );
+  assert(
+    isInternalTranscriptMessage(
+      'The user has been silent. Say one short sentence wishing them a great day.',
+    ),
+    'isInternalTranscriptMessage should hide silence think prompts',
+  );
 }
 
 async function verifyAgoraWebhookSignature() {
@@ -399,6 +406,7 @@ async function main() {
   await verifyInviteAgentSuccess();
   await verifyStopConversationValidation();
   await verifyStopConversationSuccess();
+  verifyConversationEndHelpers();
   await verifyAgoraWebhookSignature();
   await verifyWebhooksAgoraRoute();
   await verifyToolsRouteSuccess();

@@ -34,7 +34,7 @@ import { setupRtmClient } from '@/lib/setup-rtm-client';
 import type { RtmConnectionState } from '@/types/conversation';
 import {
   getCurrentInProgressMessage,
-  getMessageList,
+  getVisibleMessageList,
   mapAgentVisualizerState,
   normalizeTimestampMs,
   normalizeTranscript,
@@ -54,6 +54,7 @@ import { isMobileBrowser } from '@/lib/device';
 import { createCloudAgentInviteRunner } from '@/lib/run-cloud-agent-invite';
 import { getRtcJoinReadyDelayMs } from '@/lib/session-bootstrap';
 import { isNexoraSessionPayload } from '@/lib/nexora-session';
+import { isInternalTranscriptMessage } from '@/lib/conversation-end';
 import { useConversationAutoEnd } from '@/hooks/use-conversation-auto-end';
 import type { ConversationComponentProps } from '@/types/conversation';
 
@@ -657,21 +658,30 @@ export default function ConversationComponent({
   // Completed (END + INTERRUPTED) messages shown as history.
   // INTERRUPTED must be included — if the agent's first turn is cut off,
   // messageList stays empty and the first interrupted turn is never shown.
-  const messageList = useMemo(() => getMessageList(transcript), [transcript]);
+  const messageList = useMemo(
+    () => getVisibleMessageList(transcript),
+    [transcript],
+  );
 
   useConversationAutoEnd({
     enabled: joinSuccess && isAgentConnected && Boolean(agoraData.agentId),
     channel: agoraData.channel,
     messageList,
     agentUid: agentUID,
-    agentState,
     onEnd: onEndConversation,
     sessionEndHandled,
   });
 
   const currentInProgressMessage = useMemo(() => {
-    // The live partial turn renders separately from the completed history list.
-    return getCurrentInProgressMessage(transcript);
+    const inProgress = getCurrentInProgressMessage(transcript);
+    if (
+      inProgress &&
+      typeof inProgress.text === 'string' &&
+      isInternalTranscriptMessage(inProgress.text)
+    ) {
+      return null;
+    }
+    return inProgress;
   }, [transcript]);
 
   // Publish local mic once the track exists; usePublish waits for RTC connection.

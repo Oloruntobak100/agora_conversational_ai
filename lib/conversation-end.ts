@@ -1,3 +1,13 @@
+/** Agora silence "think" prompts — must not show in transcript or reset idle timers. */
+export function isInternalTranscriptMessage(text: string): boolean {
+  const t = text.trim();
+  if (!t) return true;
+  if (/the user has been silent/i.test(t)) return true;
+  if (/end_conversation with channel_name/i.test(t)) return true;
+  if (/do not ask another question/i.test(t) && /silent/i.test(t)) return true;
+  return false;
+}
+
 /** Agent lines that indicate the call should end (not a check-in). */
 export function isAgentFarewellMessage(text: string): boolean {
   const t = text.trim();
@@ -21,7 +31,7 @@ export function isUserFarewellMessage(text: string): boolean {
 export function getSilenceWrapUpContent(): string {
   return (
     process.env.NEXORA_SILENCE_WRAPUP_CONTENT?.trim() ||
-    "The user has been silent. Say one short sentence wishing them a great day and goodbye. Then immediately call end_conversation with channel_name and requester_id. Do not ask another question."
+    "The user has been quiet for a while. Ask one brief, friendly question to see if they are still there or need help. Do not say goodbye unless they clearly want to end the call."
   );
 }
 
@@ -31,16 +41,15 @@ export function getFarewellHangupMs(): number {
   if (Number.isFinite(parsed) && parsed >= 500) {
     return Math.min(parsed, 30_000);
   }
-  return 5_000;
+  return 2_000;
 }
 
-/** Client safety net if end_conversation never runs after silence wrap-up. */
+/** Long idle safety net — only real user silence, not internal prompts. */
 export function getSilenceForceEndMs(): number {
   const raw = process.env.NEXT_PUBLIC_NEXORA_SILENCE_FORCE_END_MS?.trim();
   const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
-  if (Number.isFinite(parsed) && parsed >= 3_000) {
-    return Math.min(parsed, 120_000);
+  if (Number.isFinite(parsed) && parsed >= 10_000) {
+    return Math.min(parsed, 300_000);
   }
-  // Default: 5s silence trigger + time for agent goodbye TTS
-  return 12_000;
+  return 90_000;
 }
