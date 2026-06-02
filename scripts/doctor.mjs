@@ -50,4 +50,10 @@ if (!hasValue(["NEXT_AGORA_APP_CERTIFICATE", "AGORA_APP_CERTIFICATE"])) {
   );
 }
 
+if (!hasValue(["NEXT_LLM_API_KEY", "OPENAI_API_KEY"])) {
+  console.warn(
+    "WARN: NEXT_LLM_API_KEY is not set. The cloud agent may return LLM 401 unless Agora Console reseller keys are configured."
+  );
+}
+
 console.log("Doctor checks passed");

@@ -74,7 +74,11 @@ function getCta(issue: ConnectionIssue): string | null {
   const msg = issue.message.toLowerCase();
   const code = getEffectiveIssueCode(issue).toLowerCase();
 
-  if (msg.includes('http 401') || code === '401') return 'Verify provider API key.';
+  if (msg.includes('http 401') || code === '401') {
+    if (msg.includes('llm'))
+      return 'Add NEXT_LLM_API_KEY (OpenAI key) in Vercel → redeploy.';
+    return 'Verify provider API key in Vercel env and redeploy.';
+  }
   if (msg.includes('http 403') || code === '403')
     return 'Verify provider API permissions.';
   if (msg.includes('http 404') || code === '404')

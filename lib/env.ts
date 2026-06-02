@@ -39,3 +39,48 @@ export function getAgentGreeting(): string {
     "Hello! I'm listening. How can I help you today?"
   );
 }
+
+/** BYOK: OpenAI (or OpenAI-compatible) LLM — fixes cloud agent LLM 401 errors. */
+export function getLlmApiKey(): string | undefined {
+  return (
+    process.env.NEXT_LLM_API_KEY?.trim() ||
+    process.env.OPENAI_API_KEY?.trim() ||
+    undefined
+  );
+}
+
+export function getLlmUrl(): string | undefined {
+  return (
+    process.env.NEXT_LLM_URL?.trim() ||
+    "https://api.openai.com/v1/chat/completions"
+  );
+}
+
+/** BYOK: Deepgram STT */
+export function getDeepgramApiKey(): string | undefined {
+  return process.env.NEXT_DEEPGRAM_API_KEY?.trim() || undefined;
+}
+
+/** BYOK: MiniMax TTS */
+export function getMiniMaxApiKey(): string | undefined {
+  return (
+    process.env.NEXT_MINIMAX_API_KEY?.trim() ||
+    process.env.MINIMAX_API_KEY?.trim() ||
+    undefined
+  );
+}
+
+export function getMiniMaxGroupId(): string | undefined {
+  return (
+    process.env.NEXT_MINIMAX_GROUP_ID?.trim() ||
+    process.env.MINIMAX_GROUP_ID?.trim() ||
+    undefined
+  );
+}
+
+export function getMiniMaxTtsUrl(): string {
+  return (
+    process.env.NEXT_MINIMAX_TTS_URL?.trim() ||
+    "wss://api-uw.minimax.io/ws/v1/t2a_v2"
+  );
+}

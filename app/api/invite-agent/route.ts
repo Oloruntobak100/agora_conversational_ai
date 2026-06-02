@@ -1,23 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  AgoraClient,
-  Agent,
-  Area,
-  DeepgramSTT,
-  ExpiresIn,
-  MiniMaxTTS,
-  OpenAI,
-} from "agora-agent-server-sdk";
+import { AgoraClient, Area, ExpiresIn } from "agora-agent-server-sdk";
 import type { AgentResponse, ClientStartRequest } from "@/types/conversation";
 import {
-  getAgentGreeting,
   getAgentUid,
   getAgoraAppCertificate,
   getAgoraAppId,
+  getLlmApiKey,
 } from "@/lib/env";
+import { buildInviteAgentPipeline } from "@/lib/invite-agent-pipeline";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
-
-const NEXORA_SYSTEM_PROMPT = `You are a helpful voice assistant for Nexora. Keep responses concise and conversational, suitable for spoken dialogue. Do not use bullet points or numbered lists unless the user explicitly asks. Ask at most one clarifying question per turn when needed.`;
 
 export async function POST(request: NextRequest) {
   try {
@@ -34,7 +25,6 @@ export async function POST(request: NextRequest) {
 
     const appId = getAgoraAppId();
     const appCertificate = getAgoraAppCertificate();
-    const greeting = getAgentGreeting();
     const agentUid = getAgentUid();
 
     if (!channel_name || !requester_id) {
@@ -44,68 +34,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const llmApiKey = getLlmApiKey();
+    if (!llmApiKey) {
+      console.warn(
+        "[invite-agent] NEXT_LLM_API_KEY is not set. The cloud agent may return LLM 401 unless Agora Console reseller keys are configured."
+      );
+    }
+
     const client = new AgoraClient({
       area: Area.US,
       appId,
       appCertificate,
     });
 
-    const agent = new Agent({
-      name: `nexora-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
-      instructions: NEXORA_SYSTEM_PROMPT,
-      greeting,
-      failureMessage: "Please wait a moment.",
-      maxHistory: 32,
-      turnDetection: {
-        config: {
-          speech_threshold: 0.5,
-          start_of_speech: {
-            mode: "vad",
-            vad_config: {
-              interrupt_duration_ms: 160,
-              prefix_padding_ms: 300,
-            },
-          },
-          end_of_speech: {
-            mode: "vad",
-            vad_config: {
-              silence_duration_ms: 480,
-            },
-          },
-        },
-      },
-      advancedFeatures: { enable_rtm: true, enable_tools: false },
-      parameters: {
-        data_channel: "rtm",
-        enable_error_message: true,
-        enable_metrics: true,
-      },
-    })
-      .withStt(
-        new DeepgramSTT({
-          model: "nova-3",
-          language: "en",
-        })
-      )
-      .withLlm(
-        new OpenAI({
-          model: "gpt-4o-mini",
-          greetingMessage: greeting,
-          failureMessage: "Please wait a moment.",
-          maxHistory: 15,
-          params: {
-            max_tokens: 1024,
-            temperature: 0.7,
-            top_p: 0.95,
-          },
-        })
-      )
-      .withTts(
-        new MiniMaxTTS({
-          model: "speech_2_6_turbo",
-          voiceId: "English_captivating_female1",
-        })
-      );
+    const agentName = `nexora-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    const { agent, config } = buildInviteAgentPipeline(agentName);
 
     const session = agent.createSession(client, {
       channel: channel_name,
@@ -118,11 +61,23 @@ export async function POST(request: NextRequest) {
 
     const agentId = await session.start();
 
+    // #region agent log
+    console.info("[invite-agent][debug-3cbf76]", {
+      hypothesisId: "F",
+      message: "Agent started",
+      channel: channel_name,
+      agentId,
+      byok: config.byok,
+      hasLlmKey: !!llmApiKey,
+    });
+    // #endregion
+
     console.info("[invite-agent]", {
       channel: channel_name,
       agentId,
       agentUid,
       requester_id,
+      byok: config.byok,
     });
 
     return NextResponse.json({

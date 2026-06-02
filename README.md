@@ -44,10 +44,15 @@ Set in **Production** and **Preview**:
 | `NEXT_AGORA_APP_CERTIFICATE` | Yes | Console → App Certificate (server only) |
 | `NEXT_PUBLIC_AGENT_UID` | No | Default `123456`; must match server invite |
 | `NEXT_AGENT_GREETING` | No | Opening line |
+| `NEXT_LLM_API_KEY` | **Yes (production)** | OpenAI API key — cloud agent LLM (fixes error 505 / LLM 401) |
+| `NEXT_LLM_URL` | No | Default `https://api.openai.com/v1/chat/completions` |
+| `NEXT_DEEPGRAM_API_KEY` | No | BYOK STT if needed |
+| `NEXT_MINIMAX_API_KEY` | No | BYOK TTS if needed |
+| `NEXT_MINIMAX_GROUP_ID` | No | Required with MiniMax key |
 
-**Legacy fallbacks** (optional): `AGORA_APP_ID`, `AGORA_APP_CERTIFICATE` — same values as above.
+**Legacy fallbacks** (optional): `AGORA_APP_ID`, `AGORA_APP_CERTIFICATE`, `OPENAI_API_KEY` (same as `NEXT_LLM_API_KEY`).
 
-**Remove** (no longer used): `AGORA_CUSTOMER_ID`, `AGORA_CUSTOMER_SECRET`, `AGORA_AGENT_PRESET`, `OPENAI_API_KEY`, `AGENT_LLM_MODEL`.
+**Remove** (no longer used): `AGORA_CUSTOMER_ID`, `AGORA_CUSTOMER_SECRET`, `AGORA_AGENT_PRESET`, `AGENT_LLM_MODEL`.
 
 **Vercel project settings:** Node.js **22.x**. Install command: `pnpm install`. Build: `pnpm run build`.
 
@@ -93,6 +98,7 @@ pnpm run verify   # doctor + lint + typecheck + API contracts + build
 
 | Issue | Action |
 |-------|--------|
+| **LLM 401 / error 505** in Connection Details | Set `NEXT_LLM_API_KEY` in Vercel (OpenAI key), redeploy |
 | Agent silent, mic works | Run `agora project doctor --deep`; check Analytics agent **Sender** / your **Receiver** |
 | RTM login fails | Token route must use `buildTokenWithRtm` (already in this repo) |
 | Agent never joins | `NEXT_PUBLIC_AGENT_UID` must match `getAgentUid()` / invite route |
