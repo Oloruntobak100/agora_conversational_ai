@@ -216,7 +216,7 @@ export function buildInviteAgentPipeline(
         mode: "static",
         static_config: {
           phrases: ["One moment."],
-          selection_rule: "sequential",
+          selection_rule: "shuffle",
         },
       },
     });
