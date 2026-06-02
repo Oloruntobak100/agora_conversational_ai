@@ -4,6 +4,7 @@ import { useState, useRef, Suspense, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import type { RTMClient } from 'agora-rtm';
 import type { AgoraTokenData, AgoraRenewalTokens } from '../types/conversation';
+import { inviteCloudAgent } from '@/lib/invite-cloud-agent';
 import { ErrorBoundary } from './ErrorBoundary';
 import { LoadingSkeleton } from './LoadingSkeleton';
 import { resumeRtcAudioContext } from '@/lib/audio-playback';
@@ -114,28 +115,42 @@ export default function LandingPage() {
       setRtmConnectionState('connecting');
       const appId = process.env.NEXT_PUBLIC_AGORA_APP_ID!;
 
-      // RTC token + RTM first; cloud agent is invited only after the browser has
-      // joined the channel and AgoraVoiceAI is subscribed (avoids missing greeting
-      // / transcript on slower clients — same Vercel build as desktop).
-      const rtm = await bootstrapRtmClient({
-        appId,
-        uid: responseData.uid,
-        token: responseData.token,
-        channel: responseData.channel,
-      });
+      // Official quickstart: invite agent + RTM in parallel after token (works on Chrome/Edge).
+      // In-call backup invite runs if this step fails.
+      const [agentData, rtm] = await Promise.all([
+        inviteCloudAgent(responseData.uid, responseData.channel).catch((err) => {
+          console.error('Failed to start conversation with agent:', err);
+          setAgentJoinError(true);
+          return null;
+        }),
+
+        bootstrapRtmClient({
+          appId,
+          uid: responseData.uid,
+          token: responseData.token,
+          channel: responseData.channel,
+        }),
+      ]);
 
       // #region agent log
       debugSessionLog({
         location: 'LandingPage.tsx:bootstrap',
-        message: 'Token and RTM ready; deferred cloud agent invite',
-        hypothesisId: 'G',
-        data: { hasRtm: true, channel: responseData.channel },
+        message: 'Token, RTM, and parallel agent invite complete',
+        hypothesisId: 'H1',
+        data: {
+          hasRtm: true,
+          agentInviteOk: agentData !== null,
+          channel: responseData.channel,
+        },
       });
       // #endregion
 
       setRtmConnectionState('ready');
       setRtmClient(rtm);
-      setAgoraData({ ...responseData });
+      setAgoraData({
+        ...responseData,
+        agentId: agentData?.agent_id,
+      });
       setShowConversation(true);
     } catch (err) {
       // #region agent log

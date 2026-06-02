@@ -30,7 +30,6 @@ import {
 } from '@/lib/audio-playback';
 import { debugSessionLog } from '@/lib/debug-session-log';
 import { ensureMicrophoneAccess } from '@/lib/microphone-permission';
-import { inviteCloudAgent } from '@/lib/invite-cloud-agent';
 import { setupRtmClient } from '@/lib/setup-rtm-client';
 import type { RtmConnectionState } from '@/types/conversation';
 import {
@@ -52,6 +51,7 @@ import { QuickstartTranscriptPanel } from './QuickstartTranscriptPanel';
 import type { QuickstartAgentMetric } from './QuickstartPipelineMetrics';
 import { getAgentConnectionPhase } from '@/lib/agent-connection-phase';
 import { isMobileBrowser } from '@/lib/device';
+import { createCloudAgentInviteRunner } from '@/lib/run-cloud-agent-invite';
 import { markSession, resetSessionTiming } from '@/lib/session-timing';
 import type { ConversationComponentProps } from '@/types/conversation';
 
@@ -148,7 +148,7 @@ export default function ConversationComponent({
     [],
   );
   const agentWatchdogMs = useMemo(
-    () => (isMobileBrowser() ? 16_000 : 22_000),
+    () => (isMobileBrowser() ? 28_000 : 35_000),
     [],
   );
   const addConnectionIssue = useCallback((issue: ConnectionIssue) => {
@@ -271,7 +271,7 @@ export default function ConversationComponent({
 
   const rtmReconnectAttempts = useRef(0);
   const agentAudioPlayAttempted = useRef(false);
-  const agentInviteStarted = useRef(false);
+  const inviteRunnerRef = useRef(createCloudAgentInviteRunner());
   const agentWatchdogFired = useRef(false);
   const toolkitSubscribed = useRef(false);
   const transcriptLogged = useRef(false);
@@ -343,7 +343,7 @@ export default function ConversationComponent({
     setSpeakerBlocked(false);
     setConnectionIssues([]);
     agentAudioPlayAttempted.current = false;
-    agentInviteStarted.current = false;
+    inviteRunnerRef.current.cancel();
     agentWatchdogFired.current = false;
     toolkitSubscribed.current = false;
     rtmReconnectAttempts.current = 0;
@@ -360,36 +360,30 @@ export default function ConversationComponent({
     }
   }, [joinSuccess, connectionState, remoteUsers.length]);
 
-  // Invite cloud agent in parallel with toolkit init (do not wait for AgoraVoiceAI.init).
+  // Backup invite if bootstrap did not get an agent id (StrictMode-safe).
   useEffect(() => {
     if (!isReady || !joinSuccess || !activeRtm || agoraData.agentId) return;
-    if (agentInviteStarted.current) return;
 
-    agentInviteStarted.current = true;
     let cancelled = false;
 
     (async () => {
-      markSession('invite_parallel_start', 'H1');
-      const agentResponse = await inviteCloudAgent(
+      const result = await inviteRunnerRef.current.invite(
         agoraData.uid,
         agoraData.channel,
+        'after_rtc_join',
       );
       if (cancelled) return;
 
-      markSession('invite_parallel_done', 'H1', {
-        ok: Boolean(agentResponse?.agent_id),
-      });
-
-      if (agentResponse?.agent_id) {
-        onAgentStarted(agentResponse.agent_id);
+      if (result.ok) {
+        onAgentStarted(result.agentId);
       } else {
-        agentInviteStarted.current = false;
         onAgentInviteFailed?.();
       }
     })();
 
     return () => {
       cancelled = true;
+      inviteRunnerRef.current.cancel();
     };
   }, [
     isReady,
@@ -402,7 +396,7 @@ export default function ConversationComponent({
     onAgentInviteFailed,
   ]);
 
-  // Agent invited but never appears in RTC — re-invite once (common on mobile Chrome).
+  // Agent invited but never appears in RTC — re-invite once (slow Chrome/Edge paths).
   useEffect(() => {
     if (
       !joinSuccess ||
@@ -430,14 +424,15 @@ export default function ConversationComponent({
         // continue with fresh invite
       }
 
-      agentInviteStarted.current = false;
-      const agentResponse = await inviteCloudAgent(
+      inviteRunnerRef.current.cancel();
+      const result = await inviteRunnerRef.current.invite(
         agoraData.uid,
         agoraData.channel,
+        'watchdog',
       );
 
-      if (agentResponse?.agent_id) {
-        onAgentStarted(agentResponse.agent_id);
+      if (result.ok) {
+        onAgentStarted(result.agentId);
       } else {
         onAgentInviteFailed?.();
       }
