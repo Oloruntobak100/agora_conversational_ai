@@ -128,7 +128,6 @@ export default function ConversationComponent({
   const [isConnectionDetailsOpen, setIsConnectionDetailsOpen] = useState(false);
   const [activeRtm, setActiveRtm] = useState(rtmClient);
   const [rtmState, setRtmState] = useState<RtmConnectionState>(rtmConnectionState);
-  const [speakerBlocked, setSpeakerBlocked] = useState(false);
   const [micMissing, setMicMissing] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
   const [fallbackMicTrack, setFallbackMicTrack] = useState<
@@ -286,7 +285,6 @@ export default function ConversationComponent({
   }, [rtmClient, rtmConnectionState]);
 
   const rtmReconnectAttempts = useRef(0);
-  const agentAudioPlayAttempted = useRef(false);
   const inviteRunnerRef = useRef(createCloudAgentInviteRunner());
   const inviteStartedForChannel = useRef<string | null>(null);
   const agentWatchdogFired = useRef(false);
@@ -295,6 +293,39 @@ export default function ConversationComponent({
   const messageListRef = useRef<
     { uid: number; text: string; createdAt?: number }[]
   >([]);
+  const transcriptFlushRef = useRef<number | null>(null);
+  const transcriptPendingRef = useRef<
+    TranscriptHelperItem<Partial<UserTranscription | AgentTranscription>>[] | null
+  >(null);
+
+  const flushTranscript = useCallback(() => {
+    transcriptFlushRef.current = null;
+    const pending = transcriptPendingRef.current;
+    if (!pending) return;
+    transcriptPendingRef.current = null;
+    setRawTranscript([...pending]);
+  }, []);
+
+  const queueTranscriptUpdate = useCallback(
+    (
+      items: TranscriptHelperItem<
+        Partial<UserTranscription | AgentTranscription>
+      >[],
+    ) => {
+      transcriptPendingRef.current = items;
+      if (transcriptFlushRef.current !== null) return;
+      transcriptFlushRef.current = window.setTimeout(flushTranscript, 120);
+    },
+    [flushTranscript],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (transcriptFlushRef.current !== null) {
+        window.clearTimeout(transcriptFlushRef.current);
+      }
+    };
+  }, []);
 
   // Retry RTM in-call when bootstrap failed (common on mobile / incognito).
   useEffect(() => {
@@ -337,18 +368,7 @@ export default function ConversationComponent({
   ]);
 
   useEffect(() => {
-    AgoraRTC.onAutoplayFailed = () => {
-      setSpeakerBlocked(true);
-    };
-    return () => {
-      AgoraRTC.onAutoplayFailed = undefined;
-    };
-  }, []);
-
-  useEffect(() => {
-    setSpeakerBlocked(false);
     setConnectionIssues([]);
-    agentAudioPlayAttempted.current = false;
     inviteRunnerRef.current.cancel();
     inviteStartedForChannel.current = null;
     agentWatchdogFired.current = false;
@@ -450,10 +470,8 @@ export default function ConversationComponent({
     onAgentInviteFailed,
   ]);
 
-  const unlockAgentSpeaker = useCallback(async () => {
-    const played = await playAgentRemoteAudio(remoteUsers, agentUID);
-    setSpeakerBlocked(!played);
-    return played;
+  const ensureAgentAudioPlaying = useCallback(async () => {
+    await playAgentRemoteAudio(remoteUsers, agentUID);
   }, [remoteUsers, agentUID]);
 
   useEffect(() => {
@@ -461,19 +479,34 @@ export default function ConversationComponent({
     const agent = remoteUsers.find((u) => u.uid.toString() === agentUID);
     if (!agent?.audioTrack) return;
 
-    void unlockAgentSpeaker();
-  }, [joinSuccess, isAgentConnected, remoteUsers, agentUID, unlockAgentSpeaker]);
+    void ensureAgentAudioPlaying();
+  }, [joinSuccess, isAgentConnected, remoteUsers, agentUID, ensureAgentAudioPlaying]);
 
-  // Browsers (especially mobile) often block the first play(); retry until audio unlocks.
+  // Silent autoplay recovery — no UI prompt; retries briefly after agent audio arrives.
   useEffect(() => {
-    if (!joinSuccess || !isAgentConnected || !speakerBlocked) return;
+    if (!joinSuccess || !isAgentConnected) return;
 
+    void ensureAgentAudioPlaying();
+    let attempts = 0;
     const intervalId = window.setInterval(() => {
-      void unlockAgentSpeaker();
-    }, 2500);
+      attempts += 1;
+      void ensureAgentAudioPlaying();
+      if (attempts >= 15) {
+        window.clearInterval(intervalId);
+      }
+    }, 600);
 
     return () => window.clearInterval(intervalId);
-  }, [joinSuccess, isAgentConnected, speakerBlocked, unlockAgentSpeaker]);
+  }, [joinSuccess, isAgentConnected, ensureAgentAudioPlaying]);
+
+  useEffect(() => {
+    AgoraRTC.onAutoplayFailed = () => {
+      void resumeRtcAudioContext().then(() => ensureAgentAudioPlaying());
+    };
+    return () => {
+      AgoraRTC.onAutoplayFailed = undefined;
+    };
+  }, [ensureAgentAudioPlaying]);
 
   // Track the auto-assigned RTC UID for token renewal and agent invite.
   useEffect(() => {
@@ -504,7 +537,7 @@ export default function ConversationComponent({
           rtcEngine: client,
           rtmConfig: { rtmEngine: activeRtm },
           renderMode: TranscriptHelperMode.TEXT,
-          enableLog: true,
+          enableLog: false,
         });
 
         if (cancelled) {
@@ -524,7 +557,7 @@ export default function ConversationComponent({
               typeof item.text === 'string' ? item.text : String(item.text ?? '');
             return !isInternalTranscriptMessage(text);
           });
-          setRawTranscript([...filtered]);
+          queueTranscriptUpdate(filtered);
         });
         // Agent state drives the visualizer, independent of RTC audio presence.
         ai.on(AgoraVoiceAIEvents.AGENT_STATE_CHANGED, (_, event) =>
@@ -604,6 +637,7 @@ export default function ConversationComponent({
     addConnectionIssue,
     onAgentStarted,
     onAgentInviteFailed,
+    queueTranscriptUpdate,
   ]);
 
   // Raw RTM parsing is kept as a fallback for signaling-level errors and SAL status.
@@ -706,7 +740,6 @@ export default function ConversationComponent({
     if (user.uid.toString() !== agentUID) return;
 
     setIsAgentConnected(true);
-    agentAudioPlayAttempted.current = false;
 
     try {
       const ai = AgoraVoiceAI.getInstance();
@@ -717,7 +750,14 @@ export default function ConversationComponent({
       // Toolkit may not be initialized yet on very fast agent join.
     }
 
-    void unlockAgentSpeaker();
+    void ensureAgentAudioPlaying();
+  });
+
+  useClientEvent(client, 'user-published', (user, mediaType) => {
+    if (user.uid.toString() !== agentUID) return;
+    if (mediaType === 'audio') {
+      void ensureAgentAudioPlaying();
+    }
   });
 
   useClientEvent(client, 'user-left', (user) => {
@@ -882,23 +922,15 @@ export default function ConversationComponent({
 
   const handleOverlayInteract = useCallback(() => {
     void resumeRtcAudioContext();
-    void unlockAgentSpeaker();
-  }, [unlockAgentSpeaker]);
+    void ensureAgentAudioPlaying();
+  }, [ensureAgentAudioPlaying]);
 
-  // Subtitles can work while remote audio is still blocked — recover on speech.
+  // Recover playback when the agent starts speaking or thinking.
   useEffect(() => {
     if (agentState === 'speaking' || agentState === 'thinking') {
-      void unlockAgentSpeaker();
+      void ensureAgentAudioPlaying();
     }
-  }, [agentState, unlockAgentSpeaker]);
-
-  useEffect(() => {
-    if (!isAgentConnected || !speakerBlocked) return;
-    const last = messageList[messageList.length - 1];
-    if (last && String(last.uid) === agentUID) {
-      void unlockAgentSpeaker();
-    }
-  }, [messageList, isAgentConnected, speakerBlocked, agentUID, unlockAgentSpeaker]);
+  }, [agentState, ensureAgentAudioPlaying]);
 
   /**
    * Mute/unmute via track.setEnabled() only — usePublish owns publish state.
@@ -907,7 +939,7 @@ export default function ConversationComponent({
    */
   const handleMicToggle = useCallback(async () => {
     await resumeRtcAudioContext();
-    void unlockAgentSpeaker();
+    void ensureAgentAudioPlaying();
 
     const next = !isEnabled;
     const track = activeMicTrack;
@@ -921,7 +953,7 @@ export default function ConversationComponent({
     } catch (error) {
       console.error('Failed to toggle microphone:', error);
     }
-  }, [isEnabled, activeMicTrack, unlockAgentSpeaker]);
+  }, [isEnabled, activeMicTrack, ensureAgentAudioPlaying]);
 
   const handleTokenWillExpire = useCallback(async () => {
     if (!onTokenWillExpire || !joinedUID) return;
@@ -1038,7 +1070,7 @@ export default function ConversationComponent({
     };
 
     void poll();
-    const id = window.setInterval(poll, 1_500);
+    const id = window.setInterval(poll, 2_500);
     return () => {
       cancelled = true;
       window.clearInterval(id);
@@ -1061,9 +1093,6 @@ export default function ConversationComponent({
   const dismissToolBranchEvent = useCallback((id: string) => {
     setToolBranchEvents((prev) => prev.filter((e) => e.id !== id));
   }, []);
-
-  const showSpeakerPrompt =
-    isAgentSessionReady && isAgentConnected && speakerBlocked;
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -1133,15 +1162,6 @@ export default function ConversationComponent({
                 <p className="max-w-sm text-xs text-destructive">{micError}</p>
               )}
             </div>
-          )}
-          {showSpeakerPrompt && (
-            <button
-              type="button"
-              onClick={() => void unlockAgentSpeaker()}
-              className="w-full max-w-sm rounded-xl border-2 border-primary bg-primary px-5 py-3 text-base font-semibold text-black shadow-lg active:scale-[0.98]"
-            >
-              Tap to hear response
-            </button>
           )}
         <div
           className={

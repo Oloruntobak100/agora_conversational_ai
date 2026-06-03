@@ -44,7 +44,7 @@ Set in **Production** and **Preview**:
 | `NEXT_AGORA_APP_CERTIFICATE` | Yes | Console → App Certificate (server only) |
 | `NEXT_PUBLIC_AGENT_UID` | No | Default `123456`; must match server invite |
 | `NEXT_AGENT_GREETING` | No | Opening line (spoken after delay, not on join) |
-| `NEXT_AGENT_GREETING_DELAY_MS` | No | Default `5000` — wait before opening line |
+| `NEXT_AGENT_GREETING_DELAY_MS` | No | Default `3000` — wait before opening line |
 | `NEXT_LLM_API_KEY` | **Yes (production)** | OpenAI API key — cloud agent LLM (fixes error 505 / LLM 401) |
 | `NEXT_LLM_URL` | No | Default `https://api.openai.com/v1/chat/completions` |
 | `NEXT_DEEPGRAM_API_KEY` | No | BYOK STT if needed |
@@ -123,7 +123,7 @@ pnpm run verify   # doctor + lint + typecheck + API contracts + build
 - **Mobile Chrome / Android**: the cloud agent is invited **after** you join the RTC channel (avoids the agent joining an empty room while the phone is still connecting).
 - **Transcript above the orb** on small screens — scroll if needed.
 - **Microphone**: allow when prompted; Chrome → lock icon → Site settings → Microphone → Allow.
-- If you hear nothing after the agent joins, tap **Tap to hear agent** (browser autoplay policy applies on every device).
+- Audio unlocks automatically when you start a conversation (browser autoplay policy); tap the mic or orb if you ever miss the first reply.
 - **iOS Safari**: use latest iOS; disable silent mode; prefer Safari over in-app browsers.
 
 See [AGENTS.md](./AGENTS.md) and Agora [DOCS](https://github.com/AgoraIO-Conversational-AI/agent-quickstart-nextjs/tree/main/DOCS).

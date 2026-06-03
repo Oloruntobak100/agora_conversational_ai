@@ -20,7 +20,7 @@ import {
   getVadSilenceDurationMs,
 } from "@/lib/env";
 
-const NEXORA_SYSTEM_PROMPT = `You are Nexora, a calm, professional voice assistant. Keep replies concise and natural for spoken dialogue — no bullet points or numbered lists unless the user explicitly asks. Ask at most one clarifying question per turn when needed.
+const NEXORA_SYSTEM_PROMPT = `You are Nexora, a calm, professional voice assistant. Keep every spoken reply to one or two short sentences unless reading back stored email subject or body. No bullet points or numbered lists unless the user explicitly asks. Ask at most one clarifying question per turn when needed.
 
 Session context: channel {{channel_name}}, user id {{requester_id}}.
 
@@ -111,17 +111,17 @@ export function buildInviteAgentPipeline(
   };
 
   const llmBase = {
-    failureMessage: "Please wait a moment.",
-    maxHistory: 15,
+    failureMessage: "One moment.",
+    maxHistory: 10,
     templateVariables: {
       channel_name: sessionMeta.channel,
       requester_id: sessionMeta.requesterId,
     },
     ...(mcpServers ? { mcpServers } : {}),
     params: {
-      max_tokens: 1024,
-      temperature: 0.7,
-      top_p: 0.95,
+      max_tokens: 256,
+      temperature: 0.6,
+      top_p: 0.9,
     },
   };
 
@@ -167,16 +167,16 @@ export function buildInviteAgentPipeline(
   let agent = new Agent({
     name,
     instructions: NEXORA_SYSTEM_PROMPT,
-    failureMessage: "Please wait a moment.",
-    maxHistory: 32,
+    failureMessage: "One moment.",
+    maxHistory: 20,
     turnDetection: {
       config: {
         speech_threshold: 0.5,
         start_of_speech: {
           mode: "vad",
           vad_config: {
-            interrupt_duration_ms: 160,
-            prefix_padding_ms: 300,
+            interrupt_duration_ms: 140,
+            prefix_padding_ms: 200,
           },
         },
         end_of_speech: {
@@ -205,7 +205,7 @@ export function buildInviteAgentPipeline(
           : undefined,
       farewell_config: {
         graceful_enabled: true,
-        graceful_timeout_seconds: 15,
+        graceful_timeout_seconds: 10,
       },
     },
   })
