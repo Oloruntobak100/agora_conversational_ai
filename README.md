@@ -61,7 +61,7 @@ Set in **Production** and **Preview**:
 
 See [DOCS/N8N_TOOLS.md](./DOCS/N8N_TOOLS.md) and [DOCS/WEBHOOKS.md](./DOCS/WEBHOOKS.md) for tool and webhook setup.
 
-**Remove** (no longer used): `AGORA_CUSTOMER_ID`, `AGORA_CUSTOMER_SECRET`, `AGORA_AGENT_PRESET`, `AGENT_LLM_MODEL`.
+**Remove** (no longer used): `AGORA_CUSTOMER_ID`, `AGORA_CUSTOMER_SECRET`, `AGORA_AGENT_PRESET`, `AGENT_LLM_MODEL`, `AGENT_GREETING_MESSAGE`, `AGENT_GREETING_DELAY_MS`, `AGENT_SYSTEM_PROMPT` (system instructions live in `lib/invite-agent-pipeline.ts`).
 
 **Vercel project settings:** Node.js **22.x**. Install command: `pnpm install`. Build: `pnpm run build`.
 
@@ -94,6 +94,7 @@ sequenceDiagram
 | `/api/stop-conversation` | POST | Stop agent |
 | `/api/tools` | POST | Manual n8n tool bridge (testing) |
 | `/api/mcp` | GET/POST/DELETE | Streamable HTTP MCP for Agora cloud tools |
+| `/api/session-fields` | GET/POST | Form-captured email for `send_email` workflows |
 | `/api/webhooks/agora` | POST | Agora Console session notifications |
 
 ## Commands

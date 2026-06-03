@@ -3,6 +3,7 @@ import {
   getAgoraAppCertificate,
   getAgoraAppId,
 } from "@/lib/env";
+import { clearSessionFields } from "@/lib/session-fields";
 import { clearSessionToolContext } from "@/lib/session-tool-context";
 import { clearToolBranchEvents } from "@/lib/session-tool-events";
 
@@ -32,6 +33,7 @@ export async function endConversationSession(options: {
 
   clearSessionToolContext(channel);
   clearToolBranchEvents(channel);
+  clearSessionFields(channel);
 
   console.info("[end-conversation]", { agentId, channel, requesterId, reason });
 

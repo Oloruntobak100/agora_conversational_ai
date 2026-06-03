@@ -48,6 +48,7 @@ import { AgentConnectionOverlay } from './AgentConnectionOverlay';
 import { ConnectionStatusPanel } from './ConnectionStatusPanel';
 import { QuickstartConversationLayout } from './QuickstartConversationLayout';
 import { QuickstartTranscriptPanel } from './QuickstartTranscriptPanel';
+import { EmailCapturePanel } from './EmailCapturePanel';
 import { WorkflowToolBannerStack } from './WorkflowToolBanner';
 import type { QuickstartAgentMetric } from './QuickstartPipelineMetrics';
 import { getAgentConnectionPhase } from '@/lib/agent-connection-phase';
@@ -150,6 +151,10 @@ export default function ConversationComponent({
   const [toolBranchEvents, setToolBranchEvents] = useState<ToolBranchEvent[]>(
     [],
   );
+  const [emailPanelOpen, setEmailPanelOpen] = useState(false);
+  const [sessionFieldsStatus, setSessionFieldsStatus] = useState<
+    'none' | 'awaiting_capture' | 'pending_confirmation' | 'confirmed'
+  >('none');
   const toolEventsSinceRef = useRef(0);
   const connectionWaitStartedAt = useRef<number | null>(null);
   const agentConnectTimeoutMs = useMemo(
@@ -1026,6 +1031,9 @@ export default function ConversationComponent({
         setToolBranchEvents((prev) => {
           const seen = new Set(prev.map((e) => e.id));
           const next = events.filter((e) => !seen.has(e.id));
+          if (next.some((e) => e.branch === 'send_email')) {
+            setEmailPanelOpen(true);
+          }
           return next.length ? [...prev, ...next] : prev;
         });
       } catch {
@@ -1035,6 +1043,40 @@ export default function ConversationComponent({
 
     void poll();
     const id = window.setInterval(poll, 1_500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [joinSuccess, agoraData.channel]);
+
+  useEffect(() => {
+    if (!joinSuccess || !agoraData.channel) return;
+
+    let cancelled = false;
+
+    const pollFields = async () => {
+      try {
+        const res = await fetch(
+          `/api/session-fields?channel=${encodeURIComponent(agoraData.channel)}`,
+        );
+        if (!res.ok || cancelled) return;
+        const body = (await res.json()) as { status?: typeof sessionFieldsStatus };
+        const status = body.status ?? 'none';
+        if (cancelled) return;
+        setSessionFieldsStatus(status);
+        if (
+          status === 'awaiting_capture' ||
+          status === 'pending_confirmation'
+        ) {
+          setEmailPanelOpen(true);
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    void pollFields();
+    const id = window.setInterval(pollFields, 2_000);
     return () => {
       cancelled = true;
       window.clearInterval(id);
@@ -1053,6 +1095,12 @@ export default function ConversationComponent({
       <WorkflowToolBannerStack
         events={toolBranchEvents}
         onDismiss={dismissToolBranchEvent}
+      />
+      <EmailCapturePanel
+        channel={agoraData.channel}
+        open={emailPanelOpen && joinSuccess}
+        onClose={() => setEmailPanelOpen(false)}
+        onSubmitted={() => setEmailPanelOpen(true)}
       />
       <QuickstartConversationLayout
       rtmState={rtmState}
@@ -1115,6 +1163,15 @@ export default function ConversationComponent({
               className="w-full max-w-sm rounded-xl border-2 border-primary bg-primary px-5 py-3 text-base font-semibold text-black shadow-lg active:scale-[0.98]"
             >
               Tap to hear response
+            </button>
+          )}
+          {joinSuccess && !emailPanelOpen && (
+            <button
+              type="button"
+              onClick={() => setEmailPanelOpen(true)}
+              className="rounded-full border border-border bg-card/80 px-4 py-2 text-xs font-medium text-muted-foreground backdrop-blur-md transition-colors hover:border-primary/40 hover:text-foreground"
+            >
+              Enter email
             </button>
           )}
         <div

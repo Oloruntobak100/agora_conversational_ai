@@ -35,16 +35,13 @@ export function getAgentUid(): string {
 export function getAgentGreeting(): string {
   return (
     process.env.NEXT_AGENT_GREETING?.trim() ||
-    process.env.AGENT_GREETING_MESSAGE?.trim() ||
     "Hello! I'm listening. How can I help you today?"
   );
 }
 
 /** Delay before the agent speaks its opening line after joining (ms). */
 export function getAgentGreetingDelayMs(): number {
-  const raw =
-    process.env.NEXT_AGENT_GREETING_DELAY_MS?.trim() ||
-    process.env.AGENT_GREETING_DELAY_MS?.trim();
+  const raw = process.env.NEXT_AGENT_GREETING_DELAY_MS?.trim();
   if (!raw) return 5_000;
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isFinite(parsed) || parsed < 0) return 5_000;

@@ -10,6 +10,20 @@ import {
   isUserFarewellMessage,
 } from '../lib/conversation-end';
 import { verifyAgoraWebhookRequest } from '../lib/webhooks/verify-agora-signature';
+import {
+  formatEmailForSpeech,
+  isValidEmail,
+  maskEmail,
+} from '../lib/email-utils';
+import {
+  gateSendEmailWorkflow,
+  mergeSendEmailArgs,
+} from '../lib/send-email-workflow';
+import {
+  clearSessionFields,
+  confirmSessionEmail,
+  setSessionEmail,
+} from '../lib/session-fields';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -414,7 +428,91 @@ async function verifyMcpAuthRejection() {
   }
 }
 
+function verifyEmailCaptureFlow() {
+  const channel = 'email-capture-test-ch';
+  clearSessionFields(channel);
+
+  assert(!isValidEmail('not-an-email'), 'invalid email should fail validation');
+  assert(
+    isValidEmail('kaytoba49@gmail.com'),
+    'valid email with numbers should pass',
+  );
+  assert(
+    isValidEmail('user_name+tag@example.co.uk'),
+    'email with underscore and plus should pass',
+  );
+  assert(
+    maskEmail('kaytoba49@gmail.com').includes('@gmail.com'),
+    'maskEmail should keep domain visible',
+  );
+  assert(
+    formatEmailForSpeech('a@b.co').includes(' at '),
+    'formatEmailForSpeech should use spoken at',
+  );
+
+  const blocked = gateSendEmailWorkflow(channel);
+  assert(!blocked.allowed, 'send_email should block without form email');
+
+  setSessionEmail(channel, 'kaytoba49@gmail.com');
+  const pending = gateSendEmailWorkflow(channel);
+  assert(!pending.allowed, 'send_email should block until confirmed');
+
+  assert(confirmSessionEmail(channel), 'confirm_session_email should succeed');
+  const allowed = gateSendEmailWorkflow(channel);
+  assert(allowed.allowed, 'send_email should allow after confirm');
+
+  const merged = mergeSendEmailArgs({ subject: 'Hi' }, channel);
+  assert(
+    merged.to === 'kaytoba49@gmail.com',
+    'mergeSendEmailArgs should inject stored to',
+  );
+
+  clearSessionFields(channel);
+}
+
+async function verifySessionFieldsRoute() {
+  const { GET, POST } = await import('../app/api/session-fields/route');
+  const channel = 'session-fields-route-ch';
+  clearSessionFields(channel);
+
+  const getRes = await GET(
+    new NextRequest(
+      `http://localhost:3000/api/session-fields?channel=${channel}`,
+    ),
+  );
+  assert(getRes.status === 200, 'GET session-fields should return 200');
+
+  const badPost = await POST(
+    new NextRequest('http://localhost:3000/api/session-fields', {
+      method: 'POST',
+      body: JSON.stringify({ channel, email: 'bad', action: 'submit' }),
+    }),
+  );
+  assert(badPost.status === 400, 'POST session-fields should reject invalid email');
+
+  const submit = await POST(
+    new NextRequest('http://localhost:3000/api/session-fields', {
+      method: 'POST',
+      body: JSON.stringify({
+        channel,
+        email: 'test@example.com',
+        action: 'submit',
+      }),
+    }),
+  );
+  const submitBody = await getJson(submit);
+  assert(submit.status === 200, 'POST submit should succeed');
+  assert(
+    typeof submitBody.readBackLine === 'string',
+    'POST submit should return readBackLine for agent',
+  );
+
+  clearSessionFields(channel);
+}
+
 async function main() {
+  verifyEmailCaptureFlow();
+  await verifySessionFieldsRoute();
   await verifyGenerateAgoraTokenRoute();
   await verifyInviteAgentValidation();
   await verifyInviteAgentSuccess();

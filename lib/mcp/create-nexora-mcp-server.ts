@@ -23,6 +23,11 @@ const endConversationSchema = {
   reason: z.string().optional(),
 };
 
+const sessionChannelSchema = {
+  channel_name: z.string().describe("RTC channel name"),
+  requester_id: z.string().describe("User RTC uid"),
+};
+
 export function createNexoraMcpServer(): McpServer {
   const server = new McpServer({
     name: "nexora",
@@ -39,6 +44,44 @@ export function createNexoraMcpServer(): McpServer {
     async (args) => {
       const result = await executeAgentTool({
         tool: "invoke_workflow",
+        args: args as Record<string, unknown>,
+      });
+      return {
+        content: result.content,
+        isError: result.isError,
+      };
+    },
+  );
+
+  server.registerTool(
+    "get_session_fields",
+    {
+      description:
+        "Read form-captured session fields (email). Use after the user submits the on-screen email form to read back and confirm.",
+      inputSchema: sessionChannelSchema,
+    },
+    async (args) => {
+      const result = await executeAgentTool({
+        tool: "get_session_fields",
+        args: args as Record<string, unknown>,
+      });
+      return {
+        content: result.content,
+        isError: result.isError,
+      };
+    },
+  );
+
+  server.registerTool(
+    "confirm_session_email",
+    {
+      description:
+        "Mark the form email as confirmed after the user agrees (or they tapped confirm on screen).",
+      inputSchema: sessionChannelSchema,
+    },
+    async (args) => {
+      const result = await executeAgentTool({
+        tool: "confirm_session_email",
         args: args as Record<string, unknown>,
       });
       return {

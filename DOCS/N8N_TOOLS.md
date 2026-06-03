@@ -4,7 +4,7 @@ Nexora can call **n8n Cloud** workflows while the Agora Conversational AI agent 
 
 ## Architecture
 
-1. **Production:** Agora cloud → `https://<your-domain>/api/mcp` (Streamable HTTP MCP) → `invoke_workflow` / `end_conversation`.
+1. **Production:** Agora cloud → `https://<your-domain>/api/mcp` (Streamable HTTP MCP) → `invoke_workflow`, `get_session_fields`, `confirm_session_email`, `end_conversation`.
 2. **Manual testing:** `POST /api/tools` with the same tool names and args (no MCP handshake).
 
 Both paths use `lib/agent-tools` (`executeAgentTool`, `dispatch-n8n.ts`).
@@ -55,9 +55,24 @@ Optional:
 2. Output `send_email` → email branch → **Respond to Webhook**
 3. Output `lookup_order` → order branch → **Respond to Webhook**
 
-Example voice: *"Send an email to support"* → agent calls `invoke_workflow` with `args.intent: "send_email"`.
+Example voice: *"Send an email to support"* → agent directs the user to the **on-screen email form**, then `get_session_fields` → read-back → `confirm_session_email` → `invoke_workflow` with `intent: "send_email"`.
 
-The Nexora UI shows a green **Tool activated** banner when the webhook returns successfully (polls `/api/tool-events`).
+The in-call UI shows a centered **Workflow** pill when the webhook returns successfully (polls `/api/tool-events`).
+
+### Form-first email (`send_email`)
+
+Voice STT is not used for the `to` address. Flow:
+
+1. User types email in **Email capture** panel (or taps **Enter email** during the call).
+2. `POST /api/session-fields` `{ channel, email, action: "submit" }` stores the address (`pending_confirmation`).
+3. Agent calls `get_session_fields` and reads `readBackLine` aloud for confirmation.
+4. User confirms verbally or taps **Yes, that's correct** → `confirm_session_email` or `POST` `{ action: "confirm" }`.
+5. `invoke_workflow` with `intent: "send_email"` — Nexora sets `args.to` from the stored email (overrides any LLM guess).
+
+| Route | Method | Purpose |
+|-------|--------|---------|
+| `/api/session-fields` | GET `?channel=` | Panel status: `none`, `awaiting_capture`, `pending_confirmation`, `confirmed` |
+| `/api/session-fields` | POST | `submit` (email), `confirm`, `reset` |
 
 ### Incoming payload from Nexora
 
@@ -72,6 +87,8 @@ The Nexora UI shows a green **Tool activated** banner when the webhook returns s
   "agentId": "cloud-agent-id"
 }
 ```
+
+For `send_email`, `to` is always the form-captured address when confirmed; the LLM should not pass `to` from speech.
 
 Use **`intent`** (or `args.intent`) in an n8n **Switch** node to route branches, e.g. `send_email`, `lookup_order`, `book_appointment`.
 
@@ -101,6 +118,8 @@ Validate `X-Webhook-Secret` in n8n (IF node or Function) when `N8N_WEBHOOK_SECRE
 | Tool | Args | Behavior |
 |------|------|----------|
 | `invoke_workflow` | `channel_name`, `requester_id`, optional `workflow`, `args` | POST to n8n |
+| `get_session_fields` | `channel_name`, `requester_id` | Returns form email + read-back line |
+| `confirm_session_email` | `channel_name`, `requester_id` | Marks form email confirmed before `send_email` |
 | `end_conversation` | `channel_name`, `requester_id`, optional `reason` | Stop agent + RTM end signal |
 
 The system prompt instructs the LLM to pass `channel_name` and `requester_id` from template variables `{{channel_name}}` and `{{requester_id}}`.

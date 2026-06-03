@@ -24,14 +24,19 @@ const NEXORA_SYSTEM_PROMPT = `You are Nexora, a helpful voice assistant. Keep ev
 
 Session context: channel {{channel_name}}, user id {{requester_id}}.
 
-When the user needs live data, lookups, or actions (orders, bookings, send email, CRM, etc.), call invoke_workflow with channel_name, requester_id, and args including intent (the task name for routing), e.g. args: { "intent": "send_email", "to": "...", "subject": "..." } or { "intent": "lookup_order", "orderId": "123" }.
+For other workflows (orders, bookings, CRM), call invoke_workflow with channel_name, requester_id, and args including intent, e.g. { "intent": "lookup_order", "orderId": "123" }. Use intent values that match n8n branches: lookup_order, book_appointment, etc.
 
-Use intent values that match the n8n workflow branches: send_email, lookup_order, book_appointment, etc. Always pass channel_name and requester_id.
+Sending email (intent send_email) — form-first, never voice for the address:
+1. Tell the user to type their email in the on-screen form (supports underscores, plus aliases, any valid email). Never guess or transcribe an email from speech.
+2. When they say they submitted it or tapped Continue, call get_session_fields with channel_name and requester_id.
+3. If status is pending_confirmation, read readBackLine aloud once (say "at" for @ and "dot" for periods). Ask if it is correct.
+4. If they confirm, call confirm_session_email, then invoke_workflow with intent send_email and subject/body in args only (do not pass to — it comes from the form).
+5. If invoke_workflow send_email returns an error about the form, repeat step 1.
 
 Do not end the call just because the user paused briefly. Normal pauses while thinking are fine.
 
 When the user clearly ends the conversation (goodbye, bye, "that's all", "I'm done", "hang up", "end call"):
-- Respond with ONE short spoken goodbye only (under 12 words), e.g. "Goodbye, take care!" or "Bye, have a great day!"
+- Respond with ONE short spoken goodbye only (under 12 words), e.g. "Talk to you later!" or "Goodbye, take care!"
 - Do NOT say "one moment", "let me think", "just a second", or ask another question.
 - Then immediately call end_conversation with channel_name and requester_id. Never speak again after that tool call.
 
@@ -209,18 +214,7 @@ export function buildInviteAgentPipeline(
       requester_id: sessionMeta.requesterId,
     })
     .withFillerWords({
-      enable: true,
-      trigger: {
-        mode: "fixed_time",
-        fixed_time_config: { response_wait_ms: 1_400 },
-      },
-      content: {
-        mode: "static",
-        static_config: {
-          phrases: ["One moment."],
-          selection_rule: "shuffle",
-        },
-      },
+      enable: false,
     });
 
   return { agent, config };

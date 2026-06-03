@@ -1,6 +1,13 @@
 import { dispatchN8nWorkflow } from "./dispatch-n8n";
 import { endConversationSession } from "./end-conversation";
 import { formatToolResultForMcp } from "./n8n-response";
+import {
+  formatSessionFieldsForAgent,
+  gateSendEmailWorkflow,
+  isSendEmailIntent,
+  mergeSendEmailArgs,
+} from "@/lib/send-email-workflow";
+import { confirmSessionEmail } from "@/lib/session-fields";
 import { getSessionToolContext } from "@/lib/session-tool-context";
 import { pushToolBranchEvent } from "@/lib/session-tool-events";
 import {
@@ -85,8 +92,85 @@ export async function executeAgentTool(
     };
   }
 
+  if (tool === "get_session_fields") {
+    const session = resolveSessionIds(request.args, request);
+    if (!session) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: "Missing channel_name / requester_id or active session context.",
+          },
+        ],
+      };
+    }
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: formatSessionFieldsForAgent(session.channel),
+        },
+      ],
+    };
+  }
+
+  if (tool === "confirm_session_email") {
+    const session = resolveSessionIds(request.args, request);
+    if (!session) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: "Missing channel_name / requester_id or active session context.",
+          },
+        ],
+      };
+    }
+
+    const ok = confirmSessionEmail(session.channel);
+    if (!ok) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: "No email submitted yet. Ask the user to complete the on-screen email form first.",
+          },
+        ],
+      };
+    }
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: "Email confirmed. You may now call invoke_workflow with intent send_email (subject and body in args if needed). The to address is taken from the form automatically.",
+        },
+      ],
+    };
+  }
+
   if (tool === "invoke_workflow") {
     const session = resolveSessionIds(request.args, request);
+    const intent = resolveWorkflowIntent(request.args);
+
+    if (session?.channel && isSendEmailIntent(intent)) {
+      const gate = gateSendEmailWorkflow(session.channel);
+      if (!gate.allowed) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: gate.message }],
+        };
+      }
+      request = {
+        ...request,
+        args: mergeSendEmailArgs(request.args, session.channel),
+      };
+    }
+
     const workflowKey =
       typeof request.args?.workflow === "string"
         ? request.args.workflow
@@ -107,12 +191,12 @@ export async function executeAgentTool(
     }
 
     const { parsed } = n8nResult;
-    const intent = resolveWorkflowIntent(request.args);
+    const resolvedIntent = resolveWorkflowIntent(request.args);
 
     if (session?.channel) {
       const display = buildToolBranchEvent(parsed, {
         fallbackBranch: workflowKey,
-        intent,
+        intent: resolvedIntent,
       });
       pushToolBranchEvent(session.channel, display);
       console.info("[invoke_workflow]", {
