@@ -3,7 +3,6 @@ import {
   buildEmailReadBackLine,
   isValidEmail,
 } from "@/lib/email-utils";
-import { debugLog } from "@/lib/debug-log";
 import {
   clearSessionFields,
   confirmSessionEmail,
@@ -52,18 +51,6 @@ export async function POST(request: NextRequest) {
         );
       }
       const view = await sessionFieldsPublicView(channel);
-      // #region agent log
-      debugLog(
-        "session-fields/route.ts:POST",
-        "email confirm",
-        {
-          channelLen: channel.length,
-          status: view.status,
-          storage: view.storage,
-        },
-        "C",
-      );
-      // #endregion
       return NextResponse.json({
         ok: true,
         ...view,
@@ -82,19 +69,6 @@ export async function POST(request: NextRequest) {
     await setSessionEmail(channel, email);
     const readBackLine = buildEmailReadBackLine(email);
     const view = await sessionFieldsPublicView(channel);
-    // #region agent log
-    debugLog(
-      "session-fields/route.ts:POST",
-      "email submit",
-      {
-        channelLen: channel.length,
-        action,
-        status: view.status,
-        storage: view.storage,
-      },
-      "C",
-    );
-    // #endregion
 
     return NextResponse.json({
       ok: true,

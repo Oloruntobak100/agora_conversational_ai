@@ -7,9 +7,8 @@ import {
   isSendEmailIntent,
   mergeSendEmailArgs,
 } from "@/lib/send-email-workflow";
-import { debugLog } from "@/lib/debug-log";
 import { resolveSessionChannel } from "@/lib/resolve-session-channel";
-import { confirmSessionEmail, getSessionFields } from "@/lib/session-fields";
+import { confirmSessionEmail } from "@/lib/session-fields";
 import { getSessionToolContext } from "@/lib/session-tool-context";
 import { pushToolBranchEvent } from "@/lib/session-tool-events";
 import {
@@ -96,24 +95,6 @@ export async function executeAgentTool(
 
   if (tool === "get_session_fields") {
     const channel = resolveSessionChannel(request.args, request);
-    const sessionIds = resolveSessionIds(request.args, request);
-    const fields = channel ? await getSessionFields(channel) : null;
-    // #region agent log
-    debugLog(
-      "execute-tool.ts:get_session_fields",
-      "tool read",
-      {
-        channelLen: channel?.length ?? 0,
-        hasChannelArg: Boolean(
-          typeof request.args?.channel_name === "string",
-        ),
-        resolveSessionIdsOk: Boolean(sessionIds),
-        hasEmail: Boolean(fields?.email),
-        emailConfirmed: Boolean(fields?.emailConfirmed),
-      },
-      "A",
-    );
-    // #endregion
     if (!channel) {
       return {
         isError: true,
@@ -138,17 +119,6 @@ export async function executeAgentTool(
 
   if (tool === "confirm_session_email") {
     const channel = resolveSessionChannel(request.args, request);
-    // #region agent log
-    debugLog(
-      "execute-tool.ts:confirm_session_email",
-      "tool confirm",
-      {
-        channelLen: channel?.length ?? 0,
-        resolveSessionIdsOk: Boolean(resolveSessionIds(request.args, request)),
-      },
-      "A",
-    );
-    // #endregion
     if (!channel) {
       return {
         isError: true,
