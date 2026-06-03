@@ -7,7 +7,9 @@ import {
   isSendEmailIntent,
   mergeSendEmailArgs,
 } from "@/lib/send-email-workflow";
-import { confirmSessionEmail } from "@/lib/session-fields";
+import { debugLog } from "@/lib/debug-log";
+import { resolveSessionChannel } from "@/lib/resolve-session-channel";
+import { confirmSessionEmail, getSessionFields } from "@/lib/session-fields";
 import { getSessionToolContext } from "@/lib/session-tool-context";
 import { pushToolBranchEvent } from "@/lib/session-tool-events";
 import {
@@ -93,14 +95,32 @@ export async function executeAgentTool(
   }
 
   if (tool === "get_session_fields") {
-    const session = resolveSessionIds(request.args, request);
-    if (!session) {
+    const channel = resolveSessionChannel(request.args, request);
+    const sessionIds = resolveSessionIds(request.args, request);
+    const fields = channel ? await getSessionFields(channel) : null;
+    // #region agent log
+    debugLog(
+      "execute-tool.ts:get_session_fields",
+      "tool read",
+      {
+        channelLen: channel?.length ?? 0,
+        hasChannelArg: Boolean(
+          typeof request.args?.channel_name === "string",
+        ),
+        resolveSessionIdsOk: Boolean(sessionIds),
+        hasEmail: Boolean(fields?.email),
+        emailConfirmed: Boolean(fields?.emailConfirmed),
+      },
+      "A",
+    );
+    // #endregion
+    if (!channel) {
       return {
         isError: true,
         content: [
           {
             type: "text",
-            text: "Missing channel_name / requester_id or active session context.",
+            text: "Missing channel_name. Pass the session channel_name from the system prompt.",
           },
         ],
       };
@@ -110,27 +130,38 @@ export async function executeAgentTool(
       content: [
         {
           type: "text",
-          text: await formatSessionFieldsForAgent(session.channel),
+          text: await formatSessionFieldsForAgent(channel),
         },
       ],
     };
   }
 
   if (tool === "confirm_session_email") {
-    const session = resolveSessionIds(request.args, request);
-    if (!session) {
+    const channel = resolveSessionChannel(request.args, request);
+    // #region agent log
+    debugLog(
+      "execute-tool.ts:confirm_session_email",
+      "tool confirm",
+      {
+        channelLen: channel?.length ?? 0,
+        resolveSessionIdsOk: Boolean(resolveSessionIds(request.args, request)),
+      },
+      "A",
+    );
+    // #endregion
+    if (!channel) {
       return {
         isError: true,
         content: [
           {
             type: "text",
-            text: "Missing channel_name / requester_id or active session context.",
+            text: "Missing channel_name. Pass the session channel_name from the system prompt.",
           },
         ],
       };
     }
 
-    const ok = await confirmSessionEmail(session.channel);
+    const ok = await confirmSessionEmail(channel);
     if (!ok) {
       return {
         isError: true,
@@ -157,8 +188,11 @@ export async function executeAgentTool(
     const session = resolveSessionIds(request.args, request);
     const intent = resolveWorkflowIntent(request.args);
 
-    if (session?.channel && isSendEmailIntent(intent)) {
-      const gate = await gateSendEmailWorkflow(session.channel);
+    const workflowChannel =
+      session?.channel ?? resolveSessionChannel(request.args, request);
+
+    if (workflowChannel && isSendEmailIntent(intent)) {
+      const gate = await gateSendEmailWorkflow(workflowChannel);
       if (!gate.allowed) {
         return {
           isError: true,
@@ -167,7 +201,7 @@ export async function executeAgentTool(
       }
       request = {
         ...request,
-        args: await mergeSendEmailArgs(request.args, session.channel),
+        args: await mergeSendEmailArgs(request.args, workflowChannel),
       };
     }
 

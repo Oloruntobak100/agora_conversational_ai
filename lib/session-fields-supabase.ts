@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { debugLog } from "@/lib/debug-log";
 import type { SessionFieldsRecord } from "@/lib/session-fields-types";
 
 const TABLE = "nexora_session_fields";
@@ -79,8 +80,30 @@ export async function supabaseGetSessionFields(
 
     if (error) {
       console.warn("[session-fields-supabase] get", error.message);
+      // #region agent log
+      debugLog(
+        "session-fields-supabase.ts:get",
+        "supabase get error",
+        { channelLen: channel.length, code: error.code },
+        "B",
+      );
+      // #endregion
       return null;
     }
+    // #region agent log
+    debugLog(
+      "session-fields-supabase.ts:get",
+      "supabase get result",
+      {
+        channelLen: channel.length,
+        hasRow: Boolean(data),
+        confirmed: Boolean(
+          (data as SessionFieldsRow | null)?.email_confirmed,
+        ),
+      },
+      "B",
+    );
+    // #endregion
     if (!data) return null;
     return rowToRecord(data as SessionFieldsRow);
   } catch (error) {
@@ -102,6 +125,27 @@ export async function supabaseUpsertSessionFields(
     });
     if (error) {
       console.warn("[session-fields-supabase] upsert", error.message);
+      // #region agent log
+      debugLog(
+        "session-fields-supabase.ts:upsert",
+        "supabase upsert error",
+        { channelLen: channel.length, code: error.code },
+        "B",
+      );
+      // #endregion
+    } else {
+      // #region agent log
+      debugLog(
+        "session-fields-supabase.ts:upsert",
+        "supabase upsert ok",
+        {
+          channelLen: channel.length,
+          confirmed: entry.emailConfirmed,
+          hasEmail: Boolean(entry.email),
+        },
+        "B",
+      );
+      // #endregion
     }
   } catch (error) {
     console.warn("[session-fields-supabase] upsert", error);
