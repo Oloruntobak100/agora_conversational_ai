@@ -48,6 +48,9 @@ async function readEntry(channel: string): Promise<SessionFieldsRecord | null> {
   if (isSessionFieldsSupabaseConfigured()) {
     const fromDb = await readFromSupabase(channel);
     if (fromDb) return fromDb;
+    // Same serverless instance may have just written before Supabase read catches up.
+    const cached = memoryStore.get(channel);
+    if (cached && !isExpired(cached)) return cached;
     return null;
   }
 
@@ -95,10 +98,9 @@ export async function getSessionFieldsWithRetry(
   return getSessionFields(channel);
 }
 
-export async function getSessionFieldsStatus(
-  channel: string,
-): Promise<SessionFieldsStatus> {
-  const entry = await readEntry(channel);
+export function statusFromEntry(
+  entry: SessionFieldsRecord | null | undefined,
+): SessionFieldsStatus {
   if (!entry) return "none";
   if (entry.email && entry.emailConfirmed && entry.contentConfirmed) {
     return "content_confirmed";
@@ -116,6 +118,27 @@ export async function getSessionFieldsStatus(
   if (entry.email && !entry.emailConfirmed) return "pending_confirmation";
   if (entry.awaitingEmailCapture) return "awaiting_capture";
   return "none";
+}
+
+export async function getSessionFieldsStatus(
+  channel: string,
+): Promise<SessionFieldsStatus> {
+  return statusFromEntry(await readEntry(channel));
+}
+
+export function sessionFieldsPublicViewFromEntry(
+  entry: SessionFieldsRecord | null,
+) {
+  const status = statusFromEntry(entry);
+  return {
+    status,
+    emailMasked: entry?.email ? maskEmail(entry.email) : undefined,
+    emailConfirmed: entry?.emailConfirmed ?? false,
+    awaitingEmailCapture: entry?.awaitingEmailCapture ?? false,
+    hasContent: Boolean(entry?.subject && entry?.body),
+    contentConfirmed: entry?.contentConfirmed ?? false,
+    storage: isSessionFieldsSupabaseConfigured() ? "supabase" : "memory",
+  };
 }
 
 export async function setAwaitingEmailCapture(channel: string): Promise<void> {
@@ -183,14 +206,5 @@ export async function clearSessionFields(channel: string): Promise<void> {
 
 export async function sessionFieldsPublicView(channel: string) {
   const entry = await readEntry(channel);
-  const status = await getSessionFieldsStatus(channel);
-  return {
-    status,
-    emailMasked: entry?.email ? maskEmail(entry.email) : undefined,
-    emailConfirmed: entry?.emailConfirmed ?? false,
-    awaitingEmailCapture: entry?.awaitingEmailCapture ?? false,
-    hasContent: Boolean(entry?.subject && entry?.body),
-    contentConfirmed: entry?.contentConfirmed ?? false,
-    storage: isSessionFieldsSupabaseConfigured() ? "supabase" : "memory",
-  };
+  return sessionFieldsPublicViewFromEntry(entry);
 }

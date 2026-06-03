@@ -46,6 +46,10 @@ export function EmailCapturePanel({
     void refresh();
   }, [open, channel, refresh]);
 
+  const applyView = (data: SessionFieldsView) => {
+    setView(data);
+  };
+
   const handleSubmit = async () => {
     setError(null);
     const trimmed = email.trim();
@@ -61,14 +65,41 @@ export function EmailCapturePanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ channel, email: trimmed, action: 'submit' }),
       });
-      const data = (await res.json()) as { error?: string; readBackLine?: string };
+      const data = (await res.json()) as SessionFieldsView & {
+        error?: string;
+        readBackLine?: string;
+      };
       if (!res.ok) {
         setError(data.error ?? 'Could not save email.');
         return;
       }
-      setEmail('');
-      await refresh();
-      onSubmitted();
+
+      applyView(data);
+      if (data.status === 'pending_confirmation') {
+        setEmail('');
+        onSubmitted();
+        return;
+      }
+
+      // Supabase read lag or storage misconfiguration — retry before clearing input.
+      for (let i = 0; i < 4; i++) {
+        await new Promise((r) => setTimeout(r, 300));
+        const res2 = await fetch(
+          `/api/session-fields?channel=${encodeURIComponent(channel)}`,
+        );
+        if (!res2.ok) continue;
+        const polled = (await res2.json()) as SessionFieldsView;
+        applyView(polled);
+        if (polled.status === 'pending_confirmation') {
+          setEmail('');
+          onSubmitted();
+          return;
+        }
+      }
+
+      setError(
+        'Email could not be saved. Check Supabase (run DOCS/SUPABASE_SESSION_FIELDS.sql) and redeploy.',
+      );
     } catch {
       setError('Network error. Try again.');
     } finally {
@@ -101,7 +132,11 @@ export function EmailCapturePanel({
   if (!open) return null;
 
   const pending = view?.status === 'pending_confirmation';
-  const confirmed = view?.status === 'confirmed';
+  const confirmed =
+    view?.status === 'confirmed' ||
+    view?.status === 'pending_content' ||
+    view?.status === 'content_confirmed' ||
+    Boolean(view?.emailConfirmed);
   const masked = view?.emailMasked ?? (email ? maskEmail(email) : undefined);
 
   return (
@@ -123,10 +158,6 @@ export function EmailCapturePanel({
             >
               Email address
             </h2>
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              Type your email here. The assistant will read it back for
-              confirmation — no need to spell it aloud.
-            </p>
           </div>
           <button
             type="button"

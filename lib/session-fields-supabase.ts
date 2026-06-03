@@ -81,15 +81,11 @@ export async function supabaseUpsertSessionFields(
   const client = getSupabaseAdmin();
   if (!client) return;
 
-  try {
-    const { error } = await client.from(TABLE).upsert(recordToRow(channel, entry), {
-      onConflict: "channel",
-    });
-    if (error) {
-      console.warn("[session-fields-supabase] upsert", error.message);
-    }
-  } catch (error) {
-    console.warn("[session-fields-supabase] upsert", error);
+  const { error } = await client.from(TABLE).upsert(recordToRow(channel, entry), {
+    onConflict: "channel",
+  });
+  if (error) {
+    throw new Error(`[session-fields-supabase] upsert: ${error.message}`);
   }
 }
 

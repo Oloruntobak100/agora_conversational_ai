@@ -7,6 +7,7 @@ import {
   clearSessionFields,
   confirmSessionEmail,
   sessionFieldsPublicView,
+  sessionFieldsPublicViewFromEntry,
   setSessionEmail,
 } from "@/lib/session-fields";
 
@@ -54,7 +55,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         ok: true,
         ...view,
-        message: "Email confirmed. You can ask the assistant to send the email.",
+        message:
+          "Email confirmed. Tell the assistant what the email should say.",
       });
     }
 
@@ -66,9 +68,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await setSessionEmail(channel, email);
+    const saved = await setSessionEmail(channel, email);
     const readBackLine = buildEmailReadBackLine(email);
-    const view = await sessionFieldsPublicView(channel);
+    const view = sessionFieldsPublicViewFromEntry(saved);
 
     return NextResponse.json({
       ok: true,
@@ -79,11 +81,13 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("[session-fields]", error);
+    const message =
+      error instanceof Error ? error.message : "Failed to update session fields";
+    const hint = message.includes("session-fields-supabase")
+      ? " Run the ALTER lines in DOCS/SUPABASE_SESSION_FIELDS.sql (email_body, content_confirmed), then redeploy."
+      : "";
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Failed to update session fields",
-      },
+      { error: message + hint },
       { status: 500 },
     );
   }

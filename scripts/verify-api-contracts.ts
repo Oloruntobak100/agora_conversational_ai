@@ -559,6 +559,10 @@ async function verifySessionFieldsRoute() {
   const submitBody = await getJson(submit);
   assert(submit.status === 200, 'POST submit should succeed');
   assert(
+    submitBody.status === 'pending_confirmation',
+    'POST submit should return pending_confirmation immediately',
+  );
+  assert(
     typeof submitBody.readBackLine === 'string',
     'POST submit should return readBackLine for agent',
   );
