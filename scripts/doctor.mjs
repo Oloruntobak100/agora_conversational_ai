@@ -59,13 +59,11 @@ if (!hasValue(["NEXT_LLM_API_KEY", "OPENAI_API_KEY"])) {
 if (
   hasValue(["AGORA_ENABLE_TOOLS"]) &&
   /AGORA_ENABLE_TOOLS=(true|1|yes)/i.test(envContents) &&
-  !hasValue([
-    "KV_REST_API_URL",
-    "UPSTASH_REDIS_REST_URL",
-  ])
+  !hasValue(["SUPABASE_URL"]) &&
+  !hasValue(["SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY"])
 ) {
   console.warn(
-    "WARN: AGORA_ENABLE_TOOLS is on but KV_REST_API_URL is missing. Form email capture will not sync to the cloud agent on Vercel until you add Vercel KV (Storage → KV → Connect to project)."
+    "WARN: AGORA_ENABLE_TOOLS is on but Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY, and run DOCS/SUPABASE_SESSION_FIELDS.sql."
   );
 }
 

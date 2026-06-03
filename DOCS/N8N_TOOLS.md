@@ -74,7 +74,13 @@ Voice STT is not used for the `to` address. Flow:
 | `/api/session-fields` | GET `?channel=` | Panel status: `none`, `awaiting_capture`, `pending_confirmation`, `confirmed` |
 | `/api/session-fields` | POST | `submit` (email), `confirm`, `reset` |
 
-**Production (Vercel):** connect **Vercel KV** (or Upstash Redis) so the browser form and Agora MCP `get_session_fields` share the same storage. Add `KV_REST_API_URL` and `KV_REST_API_TOKEN` to the project (created automatically when you link KV in the Vercel dashboard). Without KV, email submit and agent tools may hit different serverless instances and the agent will not see the form email.
+**Production (Vercel):** use **Supabase** so the browser form and Agora MCP `get_session_fields` share the same storage.
+
+1. Run [`SUPABASE_SESSION_FIELDS.sql`](./SUPABASE_SESSION_FIELDS.sql) in the Supabase SQL editor.
+2. Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (service role, server-only) to Vercel.
+3. Redeploy.
+
+Without Supabase, email submit and agent tools may hit different serverless instances and the agent will not see the form email.
 
 ### Incoming payload from Nexora
 

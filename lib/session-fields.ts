@@ -1,32 +1,19 @@
 import { maskEmail } from "@/lib/email-utils";
 import {
-  isSessionFieldsKvConfigured,
-  kvDel,
-  kvGetJson,
-  kvSetJson,
-} from "@/lib/session-fields-kv";
+  isSessionFieldsSupabaseConfigured,
+  supabaseDeleteSessionFields,
+  supabaseGetSessionFields,
+  supabaseUpsertSessionFields,
+} from "@/lib/session-fields-supabase";
+import type {
+  SessionFieldsRecord,
+  SessionFieldsStatus,
+} from "@/lib/session-fields-types";
 
-export type SessionFieldsStatus =
-  | "none"
-  | "awaiting_capture"
-  | "pending_confirmation"
-  | "confirmed";
-
-export type SessionFieldsRecord = {
-  email?: string;
-  emailConfirmed: boolean;
-  awaitingEmailCapture: boolean;
-  subject?: string;
-  updatedAt: number;
-  expiresAt: number;
-};
+export type { SessionFieldsRecord, SessionFieldsStatus };
 
 const TTL_MS = 60 * 60 * 1000;
 const memoryStore = new Map<string, SessionFieldsRecord>();
-
-function sessionKey(channel: string): string {
-  return `nexora:session-fields:${channel}`;
-}
 
 function freshRecord(): SessionFieldsRecord {
   const now = Date.now();
@@ -42,18 +29,31 @@ function isExpired(entry: SessionFieldsRecord): boolean {
   return entry.expiresAt < Date.now();
 }
 
+async function readFromSupabase(
+  channel: string,
+): Promise<SessionFieldsRecord | null> {
+  const row = await supabaseGetSessionFields(channel);
+  if (!row) return null;
+  if (isExpired(row)) {
+    await supabaseDeleteSessionFields(channel);
+    memoryStore.delete(channel);
+    return null;
+  }
+  memoryStore.set(channel, row);
+  return row;
+}
+
 async function readEntry(channel: string): Promise<SessionFieldsRecord | null> {
-  const fromKv = await kvGetJson<SessionFieldsRecord>(sessionKey(channel));
-  if (fromKv && !isExpired(fromKv)) {
-    memoryStore.set(channel, fromKv);
-    return fromKv;
+  if (isSessionFieldsSupabaseConfigured()) {
+    const fromDb = await readFromSupabase(channel);
+    if (fromDb) return fromDb;
+    return null;
   }
 
   const entry = memoryStore.get(channel);
   if (!entry) return null;
   if (isExpired(entry)) {
     memoryStore.delete(channel);
-    await kvDel(sessionKey(channel));
     return null;
   }
   return entry;
@@ -66,7 +66,10 @@ async function writeEntry(
   entry.updatedAt = Date.now();
   entry.expiresAt = Date.now() + TTL_MS;
   memoryStore.set(channel, entry);
-  await kvSetJson(sessionKey(channel), entry);
+
+  if (isSessionFieldsSupabaseConfigured()) {
+    await supabaseUpsertSessionFields(channel, entry);
+  }
 }
 
 export async function getSessionFields(
@@ -75,7 +78,7 @@ export async function getSessionFields(
   return readEntry(channel);
 }
 
-/** Retry reads — helps right after form POST on another instance once KV replicates. */
+/** Retry reads — helps right after form POST on another serverless instance. */
 export async function getSessionFieldsWithRetry(
   channel: string,
   attempts = 4,
@@ -131,7 +134,9 @@ export async function confirmSessionEmail(channel: string): Promise<boolean> {
 
 export async function clearSessionFields(channel: string): Promise<void> {
   memoryStore.delete(channel);
-  await kvDel(sessionKey(channel));
+  if (isSessionFieldsSupabaseConfigured()) {
+    await supabaseDeleteSessionFields(channel);
+  }
 }
 
 export async function sessionFieldsPublicView(channel: string) {
@@ -142,6 +147,6 @@ export async function sessionFieldsPublicView(channel: string) {
     emailMasked: entry?.email ? maskEmail(entry.email) : undefined,
     emailConfirmed: entry?.emailConfirmed ?? false,
     awaitingEmailCapture: entry?.awaitingEmailCapture ?? false,
-    kvConfigured: isSessionFieldsKvConfigured(),
+    storage: isSessionFieldsSupabaseConfigured() ? "supabase" : "memory",
   };
 }
