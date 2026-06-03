@@ -1,5 +1,10 @@
 import { buildEmailReadBackLine, maskEmail } from "@/lib/email-utils";
 import {
+  buildBodyReadBackLine,
+  buildFullEmailContentReadBack,
+  buildSubjectReadBackLine,
+} from "@/lib/email-content-readback";
+import {
   getSessionFields,
   getSessionFieldsWithRetry,
   setAwaitingEmailCapture,
@@ -32,7 +37,22 @@ export async function gateSendEmailWorkflow(
   if (!fields.emailConfirmed) {
     return {
       allowed: false,
-      message: `Email is pending confirmation. Read this aloud exactly once, then wait for the user: ${buildEmailReadBackLine(fields.email)}. If they confirm, call confirm_session_email with channel_name and requester_id, then invoke_workflow send_email. If they want to change it, ask them to use the form again.`,
+      message: `Email is pending confirmation. Read this aloud exactly once, then wait for the user: ${buildEmailReadBackLine(fields.email)}. If they confirm, call confirm_session_email with channel_name and requester_id. Do not send yet.`,
+    };
+  }
+
+  if (!fields.subject?.trim() || !fields.body?.trim()) {
+    return {
+      allowed: false,
+      message:
+        'The recipient email is confirmed. Ask the user in a friendly way: "Tell me about the email — what is it for and what should it say?" Listen, then draft a concise subject and body. Call set_email_content with channel_name and requester_id, then get_session_fields and read readBackSubject and readBackBody aloud before sending.',
+    };
+  }
+
+  if (!fields.contentConfirmed) {
+    return {
+      allowed: false,
+      message: `Subject and body need confirmation. Read aloud: ${buildFullEmailContentReadBack(fields.subject, fields.body)}. If the user agrees, call confirm_email_content with channel_name and requester_id, then invoke_workflow send_email.`,
     };
   }
 
@@ -66,6 +86,13 @@ export async function mergeSendEmailArgs(
     workflowArgs.to = fields.email;
     workflowArgs.email = fields.email;
   }
+  if (fields?.subject) {
+    workflowArgs.subject = fields.subject;
+  }
+  if (fields?.body) {
+    workflowArgs.body = fields.body;
+    workflowArgs.message = fields.body;
+  }
 
   return {
     ...base,
@@ -76,6 +103,8 @@ export async function mergeSendEmailArgs(
     ...(fields?.email
       ? { to: fields.email, email: fields.email }
       : {}),
+    ...(fields?.subject ? { subject: fields.subject } : {}),
+    ...(fields?.body ? { body: fields.body, message: fields.body } : {}),
   };
 }
 
@@ -83,33 +112,65 @@ export async function formatSessionFieldsForAgent(
   channel: string,
 ): Promise<string> {
   const fields = await getSessionFieldsWithRetry(channel);
-  const status = fields
-    ? fields.emailConfirmed
-      ? "confirmed"
-      : fields.email
-        ? "pending_confirmation"
-        : fields.awaitingEmailCapture
-          ? "awaiting_capture"
-          : "none"
-    : "none";
 
   if (!fields?.email) {
     return JSON.stringify({
-      status,
+      status: "none",
       email: null,
       instruction:
         "No email on file yet. If the user says they submitted the form, call get_session_fields again in a moment. Do not ask them to re-type unless it is still empty after a retry.",
     });
   }
 
+  if (!fields.emailConfirmed) {
+    return JSON.stringify({
+      status: "pending_confirmation",
+      email: fields.email,
+      emailMasked: maskEmail(fields.email),
+      emailConfirmed: false,
+      readBackLine: buildEmailReadBackLine(fields.email),
+      instruction:
+        "Read readBackLine aloud once and ask if the address is correct. On yes, call confirm_session_email.",
+    });
+  }
+
+  if (!fields.subject?.trim() || !fields.body?.trim()) {
+    return JSON.stringify({
+      status: "confirmed",
+      email: fields.email,
+      emailMasked: maskEmail(fields.email),
+      emailConfirmed: true,
+      subject: null,
+      body: null,
+      instruction:
+        'Address is confirmed. Ask: "Tell me about the email — what should it say and who is it for?" Then draft subject and body and call set_email_content.',
+    });
+  }
+
+  if (!fields.contentConfirmed) {
+    return JSON.stringify({
+      status: "pending_content",
+      email: fields.email,
+      emailMasked: maskEmail(fields.email),
+      emailConfirmed: true,
+      subject: fields.subject,
+      body: fields.body,
+      readBackSubject: buildSubjectReadBackLine(fields.subject),
+      readBackBody: buildBodyReadBackLine(fields.body),
+      instruction:
+        "Read readBackSubject and readBackBody aloud. On yes, call confirm_email_content, then invoke_workflow send_email.",
+    });
+  }
+
   return JSON.stringify({
-    status,
+    status: "content_confirmed",
     email: fields.email,
     emailMasked: maskEmail(fields.email),
-    emailConfirmed: fields.emailConfirmed,
-    readBackLine: buildEmailReadBackLine(fields.email),
-    instruction: fields.emailConfirmed
-      ? "Email is confirmed. You may call invoke_workflow with intent send_email."
-      : "Read readBackLine aloud once and ask if it is correct. On yes, call confirm_session_email.",
+    emailConfirmed: true,
+    subject: fields.subject,
+    body: fields.body,
+    contentConfirmed: true,
+    instruction:
+      "All confirmed. Call invoke_workflow with intent send_email only (server injects to, subject, body).",
   });
 }

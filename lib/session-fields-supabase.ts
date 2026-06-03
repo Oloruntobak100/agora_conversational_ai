@@ -13,6 +13,8 @@ type SessionFieldsRow = {
   email_confirmed: boolean;
   awaiting_email_capture: boolean;
   subject: string | null;
+  email_body: string | null;
+  content_confirmed: boolean;
   updated_at: string;
   expires_at: string;
 };
@@ -23,6 +25,8 @@ function rowToRecord(row: SessionFieldsRow): SessionFieldsRecord {
     emailConfirmed: row.email_confirmed,
     awaitingEmailCapture: row.awaiting_email_capture,
     subject: row.subject ?? undefined,
+    body: row.email_body ?? undefined,
+    contentConfirmed: row.content_confirmed ?? false,
     updatedAt: new Date(row.updated_at).getTime(),
     expiresAt: new Date(row.expires_at).getTime(),
   };
@@ -38,6 +42,8 @@ function recordToRow(
     email_confirmed: entry.emailConfirmed,
     awaiting_email_capture: entry.awaitingEmailCapture,
     subject: entry.subject ?? null,
+    email_body: entry.body ?? null,
+    content_confirmed: entry.contentConfirmed,
     updated_at: new Date(entry.updatedAt).toISOString(),
     expires_at: new Date(entry.expiresAt).toISOString(),
   };

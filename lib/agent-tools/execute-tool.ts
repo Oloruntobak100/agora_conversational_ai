@@ -8,7 +8,11 @@ import {
   mergeSendEmailArgs,
 } from "@/lib/send-email-workflow";
 import { resolveSessionChannel } from "@/lib/resolve-session-channel";
-import { confirmSessionEmail } from "@/lib/session-fields";
+import {
+  confirmSessionEmail,
+  confirmSessionEmailContent,
+  setSessionEmailContent,
+} from "@/lib/session-fields";
 import { getSessionToolContext } from "@/lib/session-tool-context";
 import { pushToolBranchEvent } from "@/lib/session-tool-events";
 import {
@@ -148,7 +152,104 @@ export async function executeAgentTool(
       content: [
         {
           type: "text",
-          text: "Email confirmed. You may now call invoke_workflow with intent send_email (subject and body in args if needed). The to address is taken from the form automatically.",
+          text: "Email address confirmed. Ask the user what the email should say, then use set_email_content before sending.",
+        },
+      ],
+    };
+  }
+
+  if (tool === "set_email_content") {
+    const channel = resolveSessionChannel(request.args, request);
+    if (!channel) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: "Missing channel_name. Pass the session channel_name from the system prompt.",
+          },
+        ],
+      };
+    }
+
+    const subject =
+      typeof request.args?.subject === "string"
+        ? request.args.subject.trim()
+        : "";
+    const body =
+      typeof request.args?.body === "string"
+        ? request.args.body.trim()
+        : typeof request.args?.message === "string"
+          ? request.args.message.trim()
+          : "";
+
+    if (!subject || !body) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: "subject and body are required (non-empty strings).",
+          },
+        ],
+      };
+    }
+
+    const saved = await setSessionEmailContent(channel, subject, body);
+    if (!saved) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: "Confirm the recipient email first (confirm_session_email), then set_email_content.",
+          },
+        ],
+      };
+    }
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: await formatSessionFieldsForAgent(channel),
+        },
+      ],
+    };
+  }
+
+  if (tool === "confirm_email_content") {
+    const channel = resolveSessionChannel(request.args, request);
+    if (!channel) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: "Missing channel_name. Pass the session channel_name from the system prompt.",
+          },
+        ],
+      };
+    }
+
+    const ok = await confirmSessionEmailContent(channel);
+    if (!ok) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: "No subject and body saved yet. Call set_email_content first, then confirm_email_content.",
+          },
+        ],
+      };
+    }
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: "Subject and body confirmed. Call invoke_workflow with intent send_email to send.",
         },
       ],
     };

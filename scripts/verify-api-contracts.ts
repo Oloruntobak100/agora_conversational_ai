@@ -22,7 +22,9 @@ import {
 import {
   clearSessionFields,
   confirmSessionEmail,
+  confirmSessionEmailContent,
   setSessionEmail,
+  setSessionEmailContent,
 } from '../lib/session-fields';
 import { defaultWorkflowSuccessLabel } from '../lib/tool-branch-display';
 import {
@@ -463,13 +465,33 @@ async function verifyEmailCaptureFlow() {
   assert(!pending.allowed, 'send_email should block until confirmed');
 
   assert(await confirmSessionEmail(channel), 'confirm_session_email should succeed');
+  const needsContent = await gateSendEmailWorkflow(channel);
+  assert(!needsContent.allowed, 'send_email should require subject/body');
+
+  await setSessionEmailContent(
+    channel,
+    'Order update',
+    'Hello, your order ships tomorrow. Thank you.',
+  );
+  const needsConfirm = await gateSendEmailWorkflow(channel);
+  assert(!needsConfirm.allowed, 'send_email should require content confirmation');
+
+  assert(await confirmSessionEmailContent(channel), 'confirm_email_content should succeed');
   const allowed = await gateSendEmailWorkflow(channel);
-  assert(allowed.allowed, 'send_email should allow after confirm');
+  assert(allowed.allowed, 'send_email should allow after full confirm');
 
   const merged = await mergeSendEmailArgs({ subject: 'Hi' }, channel);
   assert(
     merged.to === 'kaytoba49@gmail.com',
     'mergeSendEmailArgs should inject stored to',
+  );
+  assert(
+    merged.subject === 'Order update',
+    'mergeSendEmailArgs should inject stored subject',
+  );
+  assert(
+    typeof merged.body === 'string' && merged.body.includes('ships tomorrow'),
+    'mergeSendEmailArgs should inject stored body',
   );
 
   const nestedMerged = await mergeSendEmailArgs(

@@ -40,12 +40,23 @@ export async function dispatchN8nWorkflow(
       : typeof args.email === "string"
         ? args.email
         : undefined;
+  const subject =
+    typeof args.subject === "string" ? args.subject : undefined;
+  const emailBody =
+    typeof args.body === "string"
+      ? args.body
+      : typeof args.message === "string"
+        ? args.message
+        : undefined;
 
   const body = {
     tool: request.tool,
     intent,
     to,
     email: to,
+    subject,
+    body: emailBody,
+    message: emailBody,
     channel_name: channelName,
     requester_id:
       request.requesterId ??

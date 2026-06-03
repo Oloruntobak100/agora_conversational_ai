@@ -28,6 +28,13 @@ const sessionChannelSchema = {
   requester_id: z.string().describe("User RTC uid"),
 };
 
+const setEmailContentSchema = {
+  channel_name: z.string(),
+  requester_id: z.string(),
+  subject: z.string().describe("Email subject line you drafted for the user"),
+  body: z.string().describe("Email body text you drafted for the user"),
+};
+
 export function createNexoraMcpServer(): McpServer {
   const server = new McpServer({
     name: "nexora",
@@ -73,10 +80,48 @@ export function createNexoraMcpServer(): McpServer {
   );
 
   server.registerTool(
+    "set_email_content",
+    {
+      description:
+        "Save drafted email subject and body after the user described what to send. Call after confirm_session_email.",
+      inputSchema: setEmailContentSchema,
+    },
+    async (args) => {
+      const result = await executeAgentTool({
+        tool: "set_email_content",
+        args: args as Record<string, unknown>,
+      });
+      return {
+        content: result.content,
+        isError: result.isError,
+      };
+    },
+  );
+
+  server.registerTool(
+    "confirm_email_content",
+    {
+      description:
+        "Mark subject and body as confirmed after reading them aloud and the user agrees.",
+      inputSchema: sessionChannelSchema,
+    },
+    async (args) => {
+      const result = await executeAgentTool({
+        tool: "confirm_email_content",
+        args: args as Record<string, unknown>,
+      });
+      return {
+        content: result.content,
+        isError: result.isError,
+      };
+    },
+  );
+
+  server.registerTool(
     "confirm_session_email",
     {
       description:
-        "Mark the form email as confirmed after the user agrees (or they tapped confirm on screen).",
+        "Mark the form email address as confirmed after the user agrees (or they tapped confirm on screen).",
       inputSchema: sessionChannelSchema,
     },
     async (args) => {

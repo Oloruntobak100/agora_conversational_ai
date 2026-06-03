@@ -20,6 +20,7 @@ function freshRecord(): SessionFieldsRecord {
   return {
     emailConfirmed: false,
     awaitingEmailCapture: false,
+    contentConfirmed: false,
     updatedAt: now,
     expiresAt: now + TTL_MS,
   };
@@ -99,6 +100,18 @@ export async function getSessionFieldsStatus(
 ): Promise<SessionFieldsStatus> {
   const entry = await readEntry(channel);
   if (!entry) return "none";
+  if (entry.email && entry.emailConfirmed && entry.contentConfirmed) {
+    return "content_confirmed";
+  }
+  if (
+    entry.email &&
+    entry.emailConfirmed &&
+    entry.subject &&
+    entry.body &&
+    !entry.contentConfirmed
+  ) {
+    return "pending_content";
+  }
   if (entry.email && entry.emailConfirmed) return "confirmed";
   if (entry.email && !entry.emailConfirmed) return "pending_confirmation";
   if (entry.awaitingEmailCapture) return "awaiting_capture";
@@ -119,8 +132,37 @@ export async function setSessionEmail(
   entry.email = email.trim();
   entry.emailConfirmed = false;
   entry.awaitingEmailCapture = false;
+  entry.subject = undefined;
+  entry.body = undefined;
+  entry.contentConfirmed = false;
   await writeEntry(channel, entry);
   return entry;
+}
+
+export async function setSessionEmailContent(
+  channel: string,
+  subject: string,
+  body: string,
+): Promise<SessionFieldsRecord | null> {
+  const entry = await readEntry(channel);
+  if (!entry?.emailConfirmed) return null;
+  entry.subject = subject.trim();
+  entry.body = body.trim();
+  entry.contentConfirmed = false;
+  await writeEntry(channel, entry);
+  return entry;
+}
+
+export async function confirmSessionEmailContent(
+  channel: string,
+): Promise<boolean> {
+  const entry = await readEntry(channel);
+  if (!entry?.emailConfirmed || !entry.subject?.trim() || !entry.body?.trim()) {
+    return false;
+  }
+  entry.contentConfirmed = true;
+  await writeEntry(channel, entry);
+  return true;
 }
 
 export async function confirmSessionEmail(channel: string): Promise<boolean> {
@@ -147,6 +189,8 @@ export async function sessionFieldsPublicView(channel: string) {
     emailMasked: entry?.email ? maskEmail(entry.email) : undefined,
     emailConfirmed: entry?.emailConfirmed ?? false,
     awaitingEmailCapture: entry?.awaitingEmailCapture ?? false,
+    hasContent: Boolean(entry?.subject && entry?.body),
+    contentConfirmed: entry?.contentConfirmed ?? false,
     storage: isSessionFieldsSupabaseConfigured() ? "supabase" : "memory",
   };
 }

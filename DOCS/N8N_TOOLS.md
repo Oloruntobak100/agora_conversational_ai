@@ -67,7 +67,8 @@ Voice STT is not used for the `to` address. Flow:
 2. `POST /api/session-fields` `{ channel, email, action: "submit" }` stores the address (`pending_confirmation`).
 3. Agent calls `get_session_fields` and reads `readBackLine` aloud for confirmation.
 4. User confirms verbally or taps **Yes, that's correct** → `confirm_session_email` or `POST` `{ action: "confirm" }`.
-5. `invoke_workflow` with `intent: "send_email"` — Nexora sets `args.to` from the stored email (overrides any LLM guess).
+5. Agent asks what the email should say → `set_email_content` with drafted `subject` and `body` → read-back → `confirm_email_content`.
+6. `invoke_workflow` with `intent: "send_email"` — Nexora injects `to`, `subject`, and `body` from the session store.
 
 | Route | Method | Purpose |
 |-------|--------|---------|
@@ -126,8 +127,10 @@ Validate `X-Webhook-Secret` in n8n (IF node or Function) when `N8N_WEBHOOK_SECRE
 | Tool | Args | Behavior |
 |------|------|----------|
 | `invoke_workflow` | `channel_name`, `requester_id`, optional `workflow`, `args` | POST to n8n |
-| `get_session_fields` | `channel_name`, `requester_id` | Returns form email + read-back line |
-| `confirm_session_email` | `channel_name`, `requester_id` | Marks form email confirmed before `send_email` |
+| `get_session_fields` | `channel_name`, `requester_id` | Returns form email, subject/body, and read-back lines |
+| `confirm_session_email` | `channel_name`, `requester_id` | Marks recipient address confirmed |
+| `set_email_content` | `channel_name`, `requester_id`, `subject`, `body` | Saves drafted subject and body after the user describes the email |
+| `confirm_email_content` | `channel_name`, `requester_id` | Marks subject/body confirmed after read-back |
 | `end_conversation` | `channel_name`, `requester_id`, optional `reason` | Stop agent + RTM end signal |
 
 The system prompt instructs the LLM to pass `channel_name` and `requester_id` from template variables `{{channel_name}}` and `{{requester_id}}`.
