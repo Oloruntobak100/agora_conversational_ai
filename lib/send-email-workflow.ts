@@ -1,5 +1,9 @@
 import { buildEmailReadBackLine, maskEmail } from "@/lib/email-utils";
-import { getSessionFields, setAwaitingEmailCapture } from "@/lib/session-fields";
+import {
+  getSessionFields,
+  getSessionFieldsWithRetry,
+  setAwaitingEmailCapture,
+} from "@/lib/session-fields";
 
 export const SEND_EMAIL_INTENT = "send_email";
 
@@ -11,15 +15,17 @@ export type SendEmailGateResult =
   | { allowed: true }
   | { allowed: false; message: string };
 
-export function gateSendEmailWorkflow(channel: string): SendEmailGateResult {
-  const fields = getSessionFields(channel);
+export async function gateSendEmailWorkflow(
+  channel: string,
+): Promise<SendEmailGateResult> {
+  const fields = await getSessionFieldsWithRetry(channel);
 
   if (!fields?.email) {
-    setAwaitingEmailCapture(channel);
+    await setAwaitingEmailCapture(channel);
     return {
       allowed: false,
       message:
-        "Email is not captured yet. Tell the user to enter their email in the on-screen form (do not guess from voice). Do not call invoke_workflow send_email until the form is submitted.",
+        "Email is not captured yet. Tell the user to enter their email in the on-screen form (do not guess from voice). When they say they submitted it, call get_session_fields again before invoke_workflow send_email.",
     };
   }
 
@@ -33,11 +39,11 @@ export function gateSendEmailWorkflow(channel: string): SendEmailGateResult {
   return { allowed: true };
 }
 
-export function mergeSendEmailArgs(
+export async function mergeSendEmailArgs(
   args: Record<string, unknown> | undefined,
   channel: string,
-): Record<string, unknown> {
-  const fields = getSessionFields(channel);
+): Promise<Record<string, unknown>> {
+  const fields = await getSessionFields(channel);
   const merged = { ...(args ?? {}) };
   if (fields?.email) {
     merged.to = fields.email;
@@ -46,8 +52,10 @@ export function mergeSendEmailArgs(
   return merged;
 }
 
-export function formatSessionFieldsForAgent(channel: string): string {
-  const fields = getSessionFields(channel);
+export async function formatSessionFieldsForAgent(
+  channel: string,
+): Promise<string> {
+  const fields = await getSessionFieldsWithRetry(channel);
   const status = fields
     ? fields.emailConfirmed
       ? "confirmed"
@@ -63,7 +71,7 @@ export function formatSessionFieldsForAgent(channel: string): string {
       status,
       email: null,
       instruction:
-        "No email on file. Ask the user to type their email in the on-screen form, then call get_session_fields again.",
+        "No email on file yet. If the user says they submitted the form, call get_session_fields again in a moment. Do not ask them to re-type unless it is still empty after a retry.",
     });
   }
 

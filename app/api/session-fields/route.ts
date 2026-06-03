@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "channel is required" }, { status: 400 });
   }
 
-  return NextResponse.json(sessionFieldsPublicView(channel));
+  return NextResponse.json(await sessionFieldsPublicView(channel));
 }
 
 export async function POST(request: NextRequest) {
@@ -35,19 +35,22 @@ export async function POST(request: NextRequest) {
     const action = body.action ?? "submit";
 
     if (action === "reset") {
-      clearSessionFields(channel);
-      return NextResponse.json({ ok: true, ...sessionFieldsPublicView(channel) });
+      await clearSessionFields(channel);
+      return NextResponse.json({
+        ok: true,
+        ...(await sessionFieldsPublicView(channel)),
+      });
     }
 
     if (action === "confirm") {
-      const ok = confirmSessionEmail(channel);
+      const ok = await confirmSessionEmail(channel);
       if (!ok) {
         return NextResponse.json(
           { error: "No email to confirm. Submit an email first." },
           { status: 400 },
         );
       }
-      const view = sessionFieldsPublicView(channel);
+      const view = await sessionFieldsPublicView(channel);
       return NextResponse.json({
         ok: true,
         ...view,
@@ -63,9 +66,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    setSessionEmail(channel, email);
+    await setSessionEmail(channel, email);
     const readBackLine = buildEmailReadBackLine(email);
-    const view = sessionFieldsPublicView(channel);
+    const view = await sessionFieldsPublicView(channel);
 
     return NextResponse.json({
       ok: true,

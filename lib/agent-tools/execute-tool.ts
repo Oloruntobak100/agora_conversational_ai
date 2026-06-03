@@ -110,7 +110,7 @@ export async function executeAgentTool(
       content: [
         {
           type: "text",
-          text: formatSessionFieldsForAgent(session.channel),
+          text: await formatSessionFieldsForAgent(session.channel),
         },
       ],
     };
@@ -130,7 +130,7 @@ export async function executeAgentTool(
       };
     }
 
-    const ok = confirmSessionEmail(session.channel);
+    const ok = await confirmSessionEmail(session.channel);
     if (!ok) {
       return {
         isError: true,
@@ -158,7 +158,7 @@ export async function executeAgentTool(
     const intent = resolveWorkflowIntent(request.args);
 
     if (session?.channel && isSendEmailIntent(intent)) {
-      const gate = gateSendEmailWorkflow(session.channel);
+      const gate = await gateSendEmailWorkflow(session.channel);
       if (!gate.allowed) {
         return {
           isError: true,
@@ -167,7 +167,7 @@ export async function executeAgentTool(
       }
       request = {
         ...request,
-        args: mergeSendEmailArgs(request.args, session.channel),
+        args: await mergeSendEmailArgs(request.args, session.channel),
       };
     }
 

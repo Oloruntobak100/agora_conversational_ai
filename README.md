@@ -95,6 +95,7 @@ sequenceDiagram
 | `/api/tools` | POST | Manual n8n tool bridge (testing) |
 | `/api/mcp` | GET/POST/DELETE | Streamable HTTP MCP for Agora cloud tools |
 | `/api/session-fields` | GET/POST | Form-captured email for `send_email` workflows |
+| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | When tools on (Vercel) | **Required on Vercel** so form email is visible to MCP `get_session_fields` |
 | `/api/webhooks/agora` | POST | Agora Console session notifications |
 
 ## Commands

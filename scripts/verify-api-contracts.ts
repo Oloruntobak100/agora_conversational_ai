@@ -428,9 +428,9 @@ async function verifyMcpAuthRejection() {
   }
 }
 
-function verifyEmailCaptureFlow() {
+async function verifyEmailCaptureFlow() {
   const channel = 'email-capture-test-ch';
-  clearSessionFields(channel);
+  await clearSessionFields(channel);
 
   assert(!isValidEmail('not-an-email'), 'invalid email should fail validation');
   assert(
@@ -450,30 +450,30 @@ function verifyEmailCaptureFlow() {
     'formatEmailForSpeech should use spoken at',
   );
 
-  const blocked = gateSendEmailWorkflow(channel);
+  const blocked = await gateSendEmailWorkflow(channel);
   assert(!blocked.allowed, 'send_email should block without form email');
 
-  setSessionEmail(channel, 'kaytoba49@gmail.com');
-  const pending = gateSendEmailWorkflow(channel);
+  await setSessionEmail(channel, 'kaytoba49@gmail.com');
+  const pending = await gateSendEmailWorkflow(channel);
   assert(!pending.allowed, 'send_email should block until confirmed');
 
-  assert(confirmSessionEmail(channel), 'confirm_session_email should succeed');
-  const allowed = gateSendEmailWorkflow(channel);
+  assert(await confirmSessionEmail(channel), 'confirm_session_email should succeed');
+  const allowed = await gateSendEmailWorkflow(channel);
   assert(allowed.allowed, 'send_email should allow after confirm');
 
-  const merged = mergeSendEmailArgs({ subject: 'Hi' }, channel);
+  const merged = await mergeSendEmailArgs({ subject: 'Hi' }, channel);
   assert(
     merged.to === 'kaytoba49@gmail.com',
     'mergeSendEmailArgs should inject stored to',
   );
 
-  clearSessionFields(channel);
+  await clearSessionFields(channel);
 }
 
 async function verifySessionFieldsRoute() {
   const { GET, POST } = await import('../app/api/session-fields/route');
   const channel = 'session-fields-route-ch';
-  clearSessionFields(channel);
+  await clearSessionFields(channel);
 
   const getRes = await GET(
     new NextRequest(
@@ -507,11 +507,11 @@ async function verifySessionFieldsRoute() {
     'POST submit should return readBackLine for agent',
   );
 
-  clearSessionFields(channel);
+  await clearSessionFields(channel);
 }
 
 async function main() {
-  verifyEmailCaptureFlow();
+  await verifyEmailCaptureFlow();
   await verifySessionFieldsRoute();
   await verifyGenerateAgoraTokenRoute();
   await verifyInviteAgentValidation();

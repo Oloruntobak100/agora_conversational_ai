@@ -33,7 +33,7 @@ export async function endConversationSession(options: {
 
   clearSessionToolContext(channel);
   clearToolBranchEvents(channel);
-  clearSessionFields(channel);
+  await clearSessionFields(channel);
 
   console.info("[end-conversation]", { agentId, channel, requesterId, reason });
 

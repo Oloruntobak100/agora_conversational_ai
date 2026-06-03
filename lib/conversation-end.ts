@@ -96,7 +96,7 @@ export function isUserEndIntent(text: string): boolean {
 export function getSilenceWrapUpContent(): string {
   return (
     process.env.NEXORA_SILENCE_WRAPUP_CONTENT?.trim() ||
-    "The user has been quiet for a while. Ask one brief, friendly question to see if they are still there or need help. Do not say goodbye unless they clearly want to end the call."
+    "The user paused briefly. Stay calm and wait — do not rush them. Only if they remain silent for a long time, ask one short, polite check-in (one sentence). Do not stack multiple questions or fill silence with chatter. Do not say goodbye unless they clearly want to end."
   );
 }
 
