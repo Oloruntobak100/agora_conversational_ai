@@ -76,7 +76,7 @@ Voice STT is not used for the `to` address. Flow:
 
 **Production (Vercel):** use **Supabase** so the browser form and Agora MCP `get_session_fields` share the same storage.
 
-1. Run [`SUPABASE_SESSION_FIELDS.sql`](./SUPABASE_SESSION_FIELDS.sql) in the Supabase SQL editor.
+1. Run [`SUPABASE_SESSION_FIELDS.sql`](./SUPABASE_SESSION_FIELDS.sql) in the Supabase SQL editor (includes `nexora_tool_events` for in-call banners).
 2. Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (service role, server-only) to Vercel.
 3. Redeploy.
 

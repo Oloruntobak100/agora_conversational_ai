@@ -2,6 +2,7 @@ import type { N8nToolResponse } from "@/lib/agent-tools/types";
 import {
   defaultIconForBranch,
   defaultToolCalledLabel,
+  defaultWorkflowSuccessLabel,
   formatBranchLabel,
 } from "@/lib/tool-branch-display";
 
@@ -12,6 +13,10 @@ export function resolveWorkflowIntent(
   for (const key of ["intent", "action", "task", "workflow"]) {
     const value = args[key];
     if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  const nested = args.args;
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+    return resolveWorkflowIntent(nested as Record<string, unknown>);
   }
   return undefined;
 }
@@ -33,7 +38,7 @@ export function buildToolBranchEvent(
     parsed.toolLabel ??
     (typeof parsed.data?.toolLabel === "string"
       ? parsed.data.toolLabel
-      : defaultToolCalledLabel(branch));
+      : defaultWorkflowSuccessLabel(branch));
 
   const icon =
     parsed.toolIcon ??

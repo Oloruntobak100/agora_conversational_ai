@@ -197,14 +197,14 @@ export async function executeAgentTool(
     const { parsed } = n8nResult;
     const resolvedIntent = resolveWorkflowIntent(request.args);
 
-    if (session?.channel) {
+    if (workflowChannel) {
       const display = buildToolBranchEvent(parsed, {
         fallbackBranch: workflowKey,
         intent: resolvedIntent,
       });
-      pushToolBranchEvent(session.channel, display);
+      await pushToolBranchEvent(workflowChannel, display);
       console.info("[invoke_workflow]", {
-        channel: session.channel,
+        channel: workflowChannel,
         branch: display.branch,
         label: display.label,
       });

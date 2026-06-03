@@ -44,12 +44,39 @@ export async function mergeSendEmailArgs(
   channel: string,
 ): Promise<Record<string, unknown>> {
   const fields = await getSessionFields(channel);
-  const merged = { ...(args ?? {}) };
+  const base = { ...(args ?? {}) };
+
+  const inner =
+    base.args && typeof base.args === "object" && !Array.isArray(base.args)
+      ? { ...(base.args as Record<string, unknown>) }
+      : {};
+
+  const channelName =
+    (typeof base.channel_name === "string" && base.channel_name.trim()) ||
+    channel;
+  const requesterId =
+    typeof base.requester_id === "string" ? base.requester_id : undefined;
+
+  const workflowArgs: Record<string, unknown> = {
+    ...inner,
+    intent: SEND_EMAIL_INTENT,
+  };
+
   if (fields?.email) {
-    merged.to = fields.email;
-    merged.intent = SEND_EMAIL_INTENT;
+    workflowArgs.to = fields.email;
+    workflowArgs.email = fields.email;
   }
-  return merged;
+
+  return {
+    ...base,
+    channel_name: channelName,
+    ...(requesterId ? { requester_id: requesterId } : {}),
+    intent: SEND_EMAIL_INTENT,
+    args: workflowArgs,
+    ...(fields?.email
+      ? { to: fields.email, email: fields.email }
+      : {}),
+  };
 }
 
 export async function formatSessionFieldsForAgent(

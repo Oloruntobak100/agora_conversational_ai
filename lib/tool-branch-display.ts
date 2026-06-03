@@ -24,3 +24,13 @@ export function defaultIconForBranch(branch: string): string {
 export function defaultToolCalledLabel(branch: string): string {
   return `${formatBranchLabel(branch)} tool called`;
 }
+
+export function defaultWorkflowSuccessLabel(branch: string): string {
+  const key = branch.trim().toLowerCase();
+  if (key === "send_email" || key === "email") return "Email sent successfully";
+  if (key === "lookup_order" || key === "order") return "Order lookup complete";
+  if (key === "book_appointment" || key === "booking") {
+    return "Booking workflow complete";
+  }
+  return `${formatBranchLabel(branch)} complete`;
+}

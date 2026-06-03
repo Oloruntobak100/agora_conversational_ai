@@ -29,15 +29,31 @@ export async function dispatchN8nWorkflow(
     headers["X-Webhook-Secret"] = secret;
   }
 
-  const intent = resolveWorkflowIntent(request.args);
+  const args = request.args ?? {};
+  const intent = resolveWorkflowIntent(args);
+  const channelName =
+    request.channel ??
+    (typeof args.channel_name === "string" ? args.channel_name : undefined);
+  const to =
+    typeof args.to === "string"
+      ? args.to
+      : typeof args.email === "string"
+        ? args.email
+        : undefined;
 
   const body = {
     tool: request.tool,
-    args: request.args ?? {},
     intent,
-    sessionId: request.sessionId ?? request.channel,
+    to,
+    email: to,
+    channel_name: channelName,
+    requester_id:
+      request.requesterId ??
+      (typeof args.requester_id === "string" ? args.requester_id : undefined),
+    args,
+    sessionId: request.sessionId ?? channelName,
     turnId: request.turnId,
-    channel: request.channel,
+    channel: channelName,
     requesterId: request.requesterId,
     agentId: request.agentId,
   };

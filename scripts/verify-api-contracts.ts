@@ -24,6 +24,11 @@ import {
   confirmSessionEmail,
   setSessionEmail,
 } from '../lib/session-fields';
+import { defaultWorkflowSuccessLabel } from '../lib/tool-branch-display';
+import {
+  buildToolBranchEvent,
+  resolveWorkflowIntent,
+} from '../lib/tool-branch-event';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -465,6 +470,35 @@ async function verifyEmailCaptureFlow() {
   assert(
     merged.to === 'kaytoba49@gmail.com',
     'mergeSendEmailArgs should inject stored to',
+  );
+
+  const nestedMerged = await mergeSendEmailArgs(
+    {
+      channel_name: channel,
+      requester_id: '811060',
+      args: { intent: 'send_email' },
+    },
+    channel,
+  );
+  assert(
+    resolveWorkflowIntent({
+      channel_name: channel,
+      args: { intent: 'send_email' },
+    }) === 'send_email',
+    'resolveWorkflowIntent should read nested args.intent',
+  );
+  assert(
+    (nestedMerged.args as Record<string, unknown>).to === 'kaytoba49@gmail.com',
+    'mergeSendEmailArgs should inject to into nested workflow args',
+  );
+
+  const banner = buildToolBranchEvent(
+    { speak: 'Done' },
+    { intent: 'send_email' },
+  );
+  assert(
+    banner.label === defaultWorkflowSuccessLabel('send_email'),
+    'buildToolBranchEvent should use success label by default',
   );
 
   await clearSessionFields(channel);

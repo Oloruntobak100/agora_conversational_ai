@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
   const sinceMs = sinceRaw ? Number.parseInt(sinceRaw, 10) : 0;
   const since = Number.isFinite(sinceMs) && sinceMs >= 0 ? sinceMs : 0;
 
-  const events = listToolBranchEvents(channel, since);
+  const events = await listToolBranchEvents(channel, since);
 
   return NextResponse.json({ events });
 }

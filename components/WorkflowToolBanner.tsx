@@ -32,13 +32,17 @@ function BannerCard({
       ? event.label
       : formatBranchLabel(event.branch);
 
+  const isSuccess = /complete|sent successfully|tool called/i.test(headline);
+
   return (
     <div
       role="status"
       aria-live="polite"
-      className={`pointer-events-none flex w-full max-w-[22rem] items-center gap-3 rounded-full border border-border/60 bg-background/90 px-4 py-2.5 shadow-lg shadow-black/25 backdrop-blur-xl transition-all duration-500 ease-out sm:max-w-sm ${
-        visible ? 'translate-y-0 opacity-100' : '-translate-y-1 opacity-0'
-      }`}
+      className={`pointer-events-none flex w-full max-w-[22rem] items-center gap-3 rounded-full border px-4 py-2.5 shadow-lg backdrop-blur-xl transition-all duration-500 ease-out sm:max-w-sm ${
+        isSuccess
+          ? 'border-emerald-500/35 bg-emerald-950/20 shadow-emerald-950/20'
+          : 'border-border/60 bg-background/90 shadow-black/25'
+      } ${visible ? 'translate-y-0 opacity-100' : '-translate-y-1 opacity-0'}`}
     >
       <span
         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted/80 text-base"
@@ -47,15 +51,21 @@ function BannerCard({
         {event.icon}
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
-          Workflow
+        <p
+          className={`text-[10px] font-medium uppercase tracking-[0.2em] ${
+            isSuccess ? 'text-emerald-400/90' : 'text-muted-foreground'
+          }`}
+        >
+          {isSuccess ? 'Workflow complete' : 'Workflow'}
         </p>
         <p className="truncate text-sm font-medium text-foreground">
           {headline}
         </p>
       </div>
       <span
-        className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary/80"
+        className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+          isSuccess ? 'bg-emerald-400' : 'bg-primary/80'
+        }`}
         aria-hidden
       />
     </div>

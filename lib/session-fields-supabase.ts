@@ -1,31 +1,10 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase-server";
 import type { SessionFieldsRecord } from "@/lib/session-fields-types";
 
 const TABLE = "nexora_session_fields";
 
-let adminClient: SupabaseClient | null = null;
-
 export function isSessionFieldsSupabaseConfigured(): boolean {
-  const url = process.env.SUPABASE_URL?.trim();
-  const key =
-    process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ||
-    process.env.SUPABASE_SECRET_KEY?.trim();
-  return Boolean(url && key);
-}
-
-function getSupabaseAdmin(): SupabaseClient | null {
-  if (!isSessionFieldsSupabaseConfigured()) return null;
-  if (!adminClient) {
-    const url = process.env.SUPABASE_URL!.trim();
-    const key = (
-      process.env.SUPABASE_SERVICE_ROLE_KEY ||
-      process.env.SUPABASE_SECRET_KEY
-    )!.trim();
-    adminClient = createClient(url, key, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-  }
-  return adminClient;
+  return isSupabaseConfigured();
 }
 
 type SessionFieldsRow = {
